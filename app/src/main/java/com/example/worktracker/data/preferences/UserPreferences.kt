@@ -18,10 +18,12 @@ class UserPreferences @Inject constructor(
         sharedPrefs.edit().putFloat("HOURLY_RATE", rate.toFloat()).apply()
     }
 
-    // تتبع حالة الدوام (وقت بدء العمل)
-    private val _activeSessionStart = MutableStateFlow(
-        val storedTime = sharedPrefs.getLong("ACTIVE_SESSION_START", 0L)
-        if (storedTime == 0L) null else storedTime
+    // تتبع حالة الدوام (وقت بدء العمل) مصحح
+    private val _activeSessionStart = MutableStateFlow<Long?>(
+        run {
+            val storedTime = sharedPrefs.getLong("ACTIVE_SESSION_START", 0L)
+            if (storedTime == 0L) null else storedTime
+        }
     )
     val activeSessionStart: StateFlow<Long?> = _activeSessionStart.asStateFlow()
 
