@@ -22,14 +22,15 @@ class HomeViewModel @Inject constructor(
     val totalBalance: StateFlow<Double?> = repository.getTotalBalance()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
-    // دالة تجريبية لاختبار الواجهة قبل بناء نوافذ الإضافة الحقيقية
-    fun addTestRecord(amount: Double, isCredit: Boolean) {
+    fun addRealRecord(amount: Double, note: String, isCredit: Boolean, isRemote: Boolean) {
         viewModelScope.launch {
             repository.insertWorkDay(
                 WorkDay(
                     date = System.currentTimeMillis(),
                     amount = amount,
-                    isCredit = isCredit
+                    note = note,
+                    isCredit = isCredit,
+                    isRemote = isRemote
                 )
             )
         }
