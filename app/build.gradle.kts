@@ -26,9 +26,9 @@ android {
     signingConfigs {
         create("release") {
             val keystoreFile = File(rootProject.projectDir, "release.keystore")
-            if (keystoreFile.exists() && keystoreFile.length() > 0) {
+            if (keystoreFile.exists()) {
                 storeFile = keystoreFile
-                storePassword = System.getenv("STORE_PASSWORD")
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("KEY_ALIAS")
                 keyPassword = System.getenv("KEY_PASSWORD")
             }
@@ -42,13 +42,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            val keystoreFile = File(rootProject.projectDir, "release.keystore")
-            signingConfig = if (keystoreFile.exists() && keystoreFile.length() > 0) {
-                signingConfigs.getByName("release")
-            } else {
-                // استباقي: إذا لم تضف أسرار التوقيع بعد، يوقع التطبيق بمفتاح تجريبي لكي يثبت على هاتفك ولا يفشل البناء
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
