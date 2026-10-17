@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
@@ -16,9 +18,20 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // تقييد البناء لمعمارية هاتفك فقط
         ndk {
             abiFilters.add("arm64-v8a")
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            val keystoreFile = File(rootProject.projectDir, "release.keystore")
+            if (keystoreFile.exists() && keystoreFile.length() > 0) {
+                storeFile = keystoreFile
+                storePassword = System.getenv("STORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
         }
     }
 
@@ -29,8 +42,16 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            val keystoreFile = File(rootProject.projectDir, "release.keystore")
+            signingConfig = if (keystoreFile.exists() && keystoreFile.length() > 0) {
+                signingConfigs.getByName("release")
+            } else {
+                // استباقي: إذا لم تضف أسرار التوقيع بعد، يوقع التطبيق بمفتاح تجريبي لكي يثبت على هاتفك ولا يفشل البناء
+                signingConfigs.getByName("debug")
+            }
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -55,12 +76,12 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    
+
     // Room Database
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
-    
+
     // Dependency Injection
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
