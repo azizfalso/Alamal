@@ -5,9 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -25,31 +23,49 @@ fun HomeScreen(viewModel: HomeViewModel) {
     val totalBalance by viewModel.totalBalance.collectAsState()
     val activeDays by viewModel.activeDays.collectAsState()
 
+    var showSheet by remember { mutableStateOf(false) }
+    var currentSheetType by remember { mutableStateOf("work") }
+
+    if (showSheet) {
+        AddRecordSheet(
+            sheetType = currentSheetType,
+            onDismiss = { showSheet = false },
+            onSave = { amount, note, isCredit, isRemote ->
+                viewModel.addRealRecord(amount, note, isCredit, isRemote)
+            }
+        )
+    }
+
     Scaffold(
-        containerColor = Color(0xFF121212), // خلفية داكنة تناسب التطبيق
-        floatingActionButton = {
-            Column {
-                FloatingActionButton(
-                    onClick = { viewModel.addTestRecord(-50.0, true) },
-                    containerColor = Color(0xFF3A1C1C), // أحمر غامق للسلف
-                    contentColor = Color(0xFFFF6B6B),
-                    modifier = Modifier.padding(bottom = 8.dp)
+        containerColor = Color(0xFF121212),
+        bottomBar = {
+            BottomAppBar(
+                containerColor = Color(0xFF1A1A1A),
+                contentPadding = PaddingValues(horizontal = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("كريدي -", modifier = Modifier.padding(horizontal = 16.dp))
-                }
-                FloatingActionButton(
-                    onClick = { viewModel.addTestRecord(120.5, false) },
-                    containerColor = Color(0xFF2E3B22), // أخضر غامق للأجور
-                    contentColor = Color(0xFFA5D6A7)
-                ) {
-                    Text("يوم عمل +", modifier = Modifier.padding(horizontal = 16.dp))
+                    OutlinedButton(
+                        onClick = { currentSheetType = "credit"; showSheet = true },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF6B6B)),
+                    ) { Text("— كريدي") }
+                    
+                    OutlinedButton(
+                        onClick = { currentSheetType = "remote"; showSheet = true },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    ) { Text("عن بعد") }
+                    
+                    Button(
+                        onClick = { currentSheetType = "work"; showSheet = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E3B22), contentColor = Color(0xFFA5D6A7))
+                    ) { Text("+ يوم عمل") }
                 }
             }
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
-            
-            // بطاقة المجموع الكامل
             Card(
                 modifier = Modifier.fillMaxWidth().height(140.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
@@ -63,8 +79,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     Text("المجموع الكامل", color = Color.Gray, fontSize = 16.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "${totalBalance ?: 0.0} DH",
-                        color = Color(0xFFD4AF37), // اللون الذهبي
+                        text = "${String.format(Locale.US, "%.2f", totalBalance ?: 0.0)} DH",
+                        color = Color(0xFFD4AF37),
                         fontSize = 36.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -75,11 +91,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
             Text("السجلات الأخيرة", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(12.dp))
 
-            // قائمة الأيام
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(activeDays) { day ->
-                    DayItemCard(day)
-                }
+                items(activeDays) { day -> DayItemCard(day) }
             }
         }
     }
@@ -91,6 +104,12 @@ fun DayItemCard(day: WorkDay) {
     val dateString = dateFormat.format(Date(day.date))
     val isNegative = day.amount < 0
     val amountColor = if (isNegative) Color(0xFFFF6B6B) else Color(0xFFA5D6A7)
+    
+    val title = when {
+        day.isCredit -> "كريدي"
+        day.isRemote -> "عمل عن بعد"
+        else -> "يوم عمل"
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -102,14 +121,11 @@ fun DayItemCard(day: WorkDay) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(horizontalAlignment = Alignment.Start) {
-                Text(
-                    text = if (day.isCredit) "كريدي" else "يوم عمل",
-                    color = Color.White, 
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
+            Column {
+                Text(text = title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                if (day.note.isNotEmpty()) {
+                    Text(text = day.note, color = Color.Gray, fontSize = 12.sp)
+                }
                 Text(text = dateString, color = Color.Gray, fontSize = 14.sp)
             }
             Text(
