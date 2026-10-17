@@ -1,5 +1,6 @@
 package com.example.worktracker.ui.home
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,24 +40,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
         )
     }
 
-    Scaffold(
-        containerColor = Color(0xFF121212),
-        bottomBar = {
-            BottomAppBar(
-                containerColor = Color(0xFF1A1A1A),
-                contentPadding = PaddingValues(horizontal = 16.dp)
-            ) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    OutlinedButton(onClick = { currentSheetType = "credit"; showSheet = true }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF6B6B))) { Text("— كريدي") }
-                    OutlinedButton(onClick = { currentSheetType = "remote"; showSheet = true }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("عن بعد") }
-                    Button(onClick = { currentSheetType = "work"; showSheet = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E3B22), contentColor = Color(0xFFA5D6A7))) { Text("+ إضافة يدوية") }
-                }
-            }
-        }
-    ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
-            
-            // بطاقة المجموع
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF121212))) {
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp).padding(bottom = 70.dp)) { // مساحة للأزرار
             Card(
                 modifier = Modifier.fillMaxWidth().height(120.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
@@ -64,18 +49,14 @@ fun HomeScreen(viewModel: HomeViewModel) {
             ) {
                 Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Text("المجموع الكامل", color = Color.Gray, fontSize = 16.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
                     Text(text = "${String.format(Locale.US, "%.2f", totalBalance ?: 0.0)} DH", color = Color(0xFFD4AF37), fontSize = 32.sp, fontWeight = FontWeight.Bold)
                 }
             }
-
             Spacer(modifier = Modifier.height(16.dp))
 
-            // الزر الذكي لتسجيل الدخول والخروج مع عداد حي
             val isClockedIn = activeSessionStart != null
-            val cardColor = if (isClockedIn) Color(0xFF3A1C1C) else Color(0xFF2E3B22) // أحمر عند العمل، أخضر جاهز للعمل
+            val cardColor = if (isClockedIn) Color(0xFF3A1C1C) else Color(0xFF2E3B22)
             val textColor = if (isClockedIn) Color(0xFFFF6B6B) else Color(0xFFA5D6A7)
-
             var elapsedTime by remember { mutableStateOf("00:00:00") }
 
             LaunchedEffect(isClockedIn, activeSessionStart) {
@@ -86,7 +67,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         val minutes = ((durationMillis / (1000 * 60)) % 60).toInt()
                         val seconds = ((durationMillis / 1000) % 60).toInt()
                         elapsedTime = String.format("%02d:%02d:%02d", hours, minutes, seconds)
-                        delay(1000) // تحديث كل ثانية
+                        delay(1000)
                     }
                 }
             }
@@ -103,19 +84,27 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     }
                     if (isClockedIn) {
                         Text(elapsedTime, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    } else {
-                        Text("▶", color = textColor, fontSize = 24.sp)
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
             Text("السجلات الأخيرة", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(activeDays) { day -> DayItemCard(day) }
             }
+        }
+
+        // الأزرار السفلية (عائمة فوق القائمة)
+        Row(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp).background(Color(0xFF1A1A1A).copy(alpha = 0.9f), RoundedCornerShape(16.dp)).padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            OutlinedButton(onClick = { currentSheetType = "credit"; showSheet = true }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF6B6B))) { Text("— كريدي") }
+            OutlinedButton(onClick = { currentSheetType = "remote"; showSheet = true }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("عن بعد") }
+            Button(onClick = { currentSheetType = "work"; showSheet = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E3B22), contentColor = Color(0xFFA5D6A7))) { Text("+ إضافة") }
         }
     }
 }
@@ -124,30 +113,17 @@ fun HomeScreen(viewModel: HomeViewModel) {
 fun DayItemCard(day: WorkDay) {
     val dateFormat = SimpleDateFormat("dd MMMM", Locale("ar"))
     val dateString = dateFormat.format(Date(day.date))
-    
-    // إظهار التوقيت إذا كان مسجلاً بالعداد الآلي
-    val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
-    val timeString = if (day.startTime != null && day.endTime != null) {
-        "${timeFormat.format(Date(day.startTime))} - ${timeFormat.format(Date(day.endTime))}"
-    } else {
-        day.note.ifEmpty { "إضافة يدوية" }
-    }
-
     val isNegative = day.amount < 0
     val amountColor = if (isNegative) Color(0xFFFF6B6B) else Color(0xFFA5D6A7)
-    val title = when {
-        day.isCredit -> "كريدي"
-        day.isRemote -> "عمل عن بعد"
-        else -> "يوم عمل"
-    }
+    val title = when { day.isCredit -> "كريدي"; day.isRemote -> "عن بعد"; else -> "يوم عمل" }
 
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)), shape = RoundedCornerShape(16.dp)) {
+    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)), shape = RoundedCornerShape(16.dp)) {
         Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text(text = title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text(text = "$dateString • $timeString", color = Color.Gray, fontSize = 13.sp)
+                Text(text = dateString, color = Color.Gray, fontSize = 13.sp)
             }
-            Text(text = "${String.format(Locale.US, "%.2f", day.amount)} DH", color = amountColor, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            Text(text = "${String.format(Locale.US, "%.2f", day.amount)} DH", color = amountColor, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         }
     }
 }
