@@ -23,7 +23,11 @@ fun CalendarScreen(viewModel: HomeViewModel) {
     val currentMonth = YearMonth.now()
     val daysInMonth = currentMonth.lengthOfMonth()
     
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    // حساب الفراغات لترتيب الأيام (الإثنين = 1، الأحد = 7)
+    val firstDayOfWeek = currentMonth.atDay(1).dayOfWeek.value 
+    val emptyDays = firstDayOfWeek - 1
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF121212)).padding(16.dp)) {
         Text(
             text = "${currentMonth.month.getDisplayName(TextStyle.FULL, Locale("ar"))} ${currentMonth.year}",
             color = Color(0xFFD4AF37),
@@ -40,8 +44,13 @@ fun CalendarScreen(viewModel: HomeViewModel) {
         }
         Spacer(modifier = Modifier.height(16.dp))
 
-        // شبكة الأيام
+        // شبكة الأيام مرتبة
         LazyVerticalGrid(columns = GridCells.Fixed(7), modifier = Modifier.fillMaxWidth()) {
+            // إضافة الفراغات في بداية الشهر
+            items(emptyDays) {
+                Spacer(modifier = Modifier.padding(4.dp).aspectRatio(1f))
+            }
+            // إضافة الأيام
             items(daysInMonth) { index ->
                 val day = index + 1
                 Box(
