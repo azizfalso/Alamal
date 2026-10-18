@@ -1,11 +1,11 @@
 package com.example.worktracker.ui.summary
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -21,11 +21,11 @@ fun SummaryScreen(viewModel: HomeViewModel) {
     val totalBalance by viewModel.totalBalance.collectAsState()
     val days by viewModel.activeDays.collectAsState()
 
-    // حساب إحصائيات سريعة
     val totalWages = days.filter { !it.isCredit }.sumOf { it.amount }
-    val totalCredit = days.filter { it.isCredit }.sumOf { it.amount } // مخزن بالسالب
+    val totalCredit = days.filter { it.isCredit }.sumOf { it.amount }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    // فرض الخلفية الداكنة هنا أيضاً
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF121212)).padding(16.dp)) {
         Text("نظرة عامة", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -38,7 +38,6 @@ fun SummaryScreen(viewModel: HomeViewModel) {
         Text("الأيام الأخيرة (رسم بياني)", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
 
-        // رسم بياني ذكي بـ Canvas (آخر 7 سجلات)
         val recentAmounts = days.take(7).map { it.amount.toFloat() }.reversed()
         if (recentAmounts.isNotEmpty()) {
             val maxAmount = recentAmounts.maxOfOrNull { Math.abs(it) } ?: 1f
@@ -65,7 +64,6 @@ fun SummaryScreen(viewModel: HomeViewModel) {
                             cornerRadius = CornerRadius(8f, 8f)
                         )
                     }
-                    // خط الصفر
                     drawLine(color = Color.Gray.copy(alpha = 0.5f), start = Offset(0f, size.height / 2), end = Offset(size.width, size.height / 2), strokeWidth = 2f)
                 }
             }
