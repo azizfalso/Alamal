@@ -1,23 +1,28 @@
 package com.nanomks.elamal.ui
 
 import androidx.biometric.BiometricPrompt
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -30,102 +35,287 @@ fun AppState.LockScreen(activity: FragmentActivity) {
     var pinInput by remember { mutableStateOf("") }
     var pinError by remember { mutableStateOf("") }
 
+    fun attemptUnlock(candidatePin: String, isAutoCheck: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (now < lockoutUntil) {
+            val remSec = ((lockoutUntil - now) / 1000L).coerceAtLeast(1L)
+            pinError = "تم تجاوز 7 محاولات! انتظر $remSec ثانية."
+            return
+        }
+        if (ElamalSecurity.verifyPin(candidatePin, savedPin)) {
+            if (!savedPin.startsWith("PBKDF2_V1:")) {
+                val hashed = ElamalSecurity.hashPinPbkdf2(candidatePin)
+                savedPin = hashed
+                prefs.edit().putString("security_pin", hashed).apply()
+            }
+            failedPinAttempts = 0
+            prefs.edit().putInt("failed_pin_attempts", 0).apply()
+            isUnlocked = true
+        } else if (!isAutoCheck) {
+            failedPinAttempts += 1
+            prefs.edit().putInt("failed_pin_attempts", failedPinAttempts).apply()
+            pinInput = ""
+            if (failedPinAttempts >= 7) {
+                lockoutUntil = now + 30_000L
+                prefs.edit().putLong("lockout_until", lockoutUntil).apply()
+                pinError = "7 محاولات خاطئة! تم تأخير الفتح 30 ثانية."
+            } else {
+                pinError = "رمز القفل غير صحيح ($failedPinAttempts / 7)"
+            }
+        }
+    }
+
+    fun triggerBiometric() {
+        val executor = ContextCompat.getMainExecutor(context)
+        val prompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                failedPinAttempts = 0
+                prefs.edit().putInt("failed_pin_attempts", 0).apply()
+                isUnlocked = true
+            }
+        })
+        val info = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("فتح تطبيق العمل بالبصمة")
+            .setSubtitle("استخدم البصمة لفتح القفل بسرعة")
+            .setNegativeButtonText("إدخال الرمز")
+            .build()
+        prompt.authenticate(info)
+    }
+
     Surface(modifier = Modifier.fillMaxSize(), color = colorScheme.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(28.dp),
-            verticalArrangement = Arrangement.Center,
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(
-                modifier = Modifier
-                    .size(84.dp)
-                    .background(primaryCustom.copy(alpha = 0.14f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(42.dp), tint = primaryCustom)
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("تطبيق «العمل» محمي", fontSize = (22 * fontScale).sp, fontWeight = FontWeight.ExtraBold)
-            Text("أدخل رمز القفل أو استخدم البصمة للمتابعة", fontSize = 13.sp, color = colorScheme.onSurfaceVariant)
-            Spacer(modifier = Modifier.height(22.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            OutlinedTextField(
-                value = pinInput,
-                onValueChange = { if (it.length <= 8 && it.all { c -> c.isDigit() }) pinInput = it },
-                label = { Text("رمز القفل (4 إلى 8 أرقام)") },
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp)
-            )
-            if (pinError.isNotBlank()) {
-                Text(pinError, color = Color(0xFFEF4444), fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-            }
-            Spacer(modifier = Modifier.height(22.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(
-                    onClick = {
-                        val now = System.currentTimeMillis()
-                        if (now < lockoutUntil) {
-                            val remSec = (lockoutUntil - now) / 1000L
-                            pinError = "تم تجاوز 7 محاولات! انتظر $remSec ثانية."
-                            return@Button
-                        }
-                        if (ElamalSecurity.verifyPin(pinInput, savedPin)) {
-                            // Auto-upgrade legacy PIN to salted PBKDF2 hash
-                            if (!savedPin.startsWith("PBKDF2_V1:")) {
-                                val hashed = ElamalSecurity.hashPinPbkdf2(pinInput)
-                                savedPin = hashed
-                                prefs.edit().putString("security_pin", hashed).apply()
-                            }
-                            failedPinAttempts = 0
-                            prefs.edit().putInt("failed_pin_attempts", 0).apply()
-                            isUnlocked = true
-                        } else {
-                            failedPinAttempts += 1
-                            prefs.edit().putInt("failed_pin_attempts", failedPinAttempts).apply()
-                            if (failedPinAttempts >= 7) {
-                                lockoutUntil = now + 30_000L
-                                prefs.edit().putLong("lockout_until", lockoutUntil).apply()
-                                pinError = "7 محاولات خاطئة! تم تأخير الفتح 30 ثانية."
-                            } else {
-                                pinError = "رمز خاطئ ($failedPinAttempts / 7)"
-                            }
-                        }
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.height(48.dp)
-                ) { Text("فتح القفل", fontWeight = FontWeight.Bold) }
-
-                OutlinedButton(
-                    onClick = {
-                        val executor = ContextCompat.getMainExecutor(context)
-                        val prompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
-                            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                                isUnlocked = true
-                            }
-                        })
-                        val info = BiometricPrompt.PromptInfo.Builder()
-                            .setTitle("فتح تطبيق العمل بالبصمة")
-                            .setSubtitle("استخدم البصمة كاختصار لفتح القفل")
-                            .setNegativeButtonText("إلغاء")
-                            .build()
-                        prompt.authenticate(info)
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.height(48.dp)
+            // Top Header & PIN Dots Indicator
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    modifier = Modifier
+                        .size(76.dp)
+                        .background(primaryCustom.copy(alpha = 0.14f), CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Fingerprint, contentDescription = null)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("البصمة")
+                    Icon(
+                        Icons.Default.Lock,
+                        contentDescription = null,
+                        modifier = Modifier.size(38.dp),
+                        tint = primaryCustom
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    "تطبيق «العمل» محمي",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = colorScheme.onBackground
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "أدخل رمز القفل من اللوحة أدناه أو استخدم البصمة",
+                    fontSize = 13.sp,
+                    color = colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(26.dp))
+
+                // Interactive PIN Dots (LTR order so dots fill from left to right naturally)
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    val dotCount = maxOf(4, pinInput.length.coerceAtMost(8))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        for (i in 0 until dotCount) {
+                            val isFilled = i < pinInput.length
+                            val dotColor by animateColorAsState(
+                                targetValue = if (isFilled) primaryCustom else Color.Transparent,
+                                label = "PinDot"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor)
+                                    .border(
+                                        width = 2.dp,
+                                        color = if (isFilled) primaryCustom else colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                        shape = CircleShape
+                                    )
+                            )
+                        }
+                    }
+                }
+
+                if (pinError.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Surface(
+                        color = Color(0xFFEF4444).copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            text = pinError,
+                            color = Color(0xFFEF4444),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
+                    }
                 }
             }
+
+            // Custom Built-in Numeric Keypad (No System Keyboard!)
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    val rows = listOf(
+                        listOf("1", "2", "3"),
+                        listOf("4", "5", "6"),
+                        listOf("7", "8", "9")
+                    )
+
+                    rows.forEach { rowDigits ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(24.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            rowDigits.forEach { digit ->
+                                PinPadButton(
+                                    label = digit,
+                                    surfaceColor = colorScheme.surface,
+                                    contentColor = colorScheme.onSurface,
+                                    onClick = {
+                                        if (pinInput.length < 8) {
+                                            pinError = ""
+                                            val updated = pinInput + digit
+                                            pinInput = updated
+                                            if (updated.length >= 4) {
+                                                attemptUnlock(updated, isAutoCheck = true)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Bottom Row: Biometric | 0 | Backspace
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Biometric Button
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(primaryCustom.copy(alpha = 0.14f))
+                                .clickable { triggerBiometric() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Fingerprint,
+                                contentDescription = "البصمة",
+                                tint = primaryCustom,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+
+                        // Digit 0
+                        PinPadButton(
+                            label = "0",
+                            surfaceColor = colorScheme.surface,
+                            contentColor = colorScheme.onSurface,
+                            onClick = {
+                                if (pinInput.length < 8) {
+                                    pinError = ""
+                                    val updated = pinInput + "0"
+                                    pinInput = updated
+                                    if (updated.length >= 4) {
+                                        attemptUnlock(updated, isAutoCheck = true)
+                                    }
+                                }
+                            }
+                        )
+
+                        // Backspace Button
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(colorScheme.surfaceVariant)
+                                .clickable {
+                                    if (pinInput.isNotEmpty()) {
+                                        pinInput = pinInput.dropLast(1)
+                                        pinError = ""
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Backspace,
+                                contentDescription = "مسح",
+                                tint = colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Explicit Confirm Button (in case user enters wrong PIN and wants feedback)
+                    Button(
+                        onClick = { attemptUnlock(pinInput, isAutoCheck = false) },
+                        enabled = pinInput.length >= 4,
+                        modifier = Modifier
+                            .fillMaxWidth(0.75f)
+                            .height(50.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryCustom)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("فتح القفل", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
 
-
-
+@Composable
+fun PinPadButton(
+    label: String,
+    surfaceColor: Color,
+    contentColor: Color,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .size(72.dp)
+            .clip(CircleShape)
+            .clickable { onClick() },
+        shape = CircleShape,
+        color = surfaceColor,
+        tonalElevation = 4.dp,
+        shadowElevation = 2.dp
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = label,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                color = contentColor
+            )
+        }
+    }
+}
