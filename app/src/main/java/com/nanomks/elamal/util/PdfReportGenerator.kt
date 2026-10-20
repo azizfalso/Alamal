@@ -31,7 +31,7 @@ object PdfReportGenerator {
             val pageWidth = 595
             val pageHeight = 842
 
-            val bgColor = if (isDarkMode) Color.parseColor("#0F172A") else Color.parseColor("#FFFFFF")
+            val bgColor = if (isDarkMode) Color.parseColor("#0F172A") else Color.WHITE
             val textColor = if (isDarkMode) Color.parseColor("#F8FAFC") else Color.parseColor("#0F172A")
             val subTextColor = if (isDarkMode) Color.parseColor("#94A3B8") else Color.parseColor("#475569")
             val gridColor = if (isDarkMode) Color.parseColor("#334155") else Color.parseColor("#CBD5E1")
@@ -64,9 +64,12 @@ object PdfReportGenerator {
                 val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex + 1).create()
                 val page = doc.startPage(pageInfo)
                 val canvas = page.canvas
-                canvas.drawColor(bgColor)
 
+                // Explicitly paint full opaque background rect so PDF viewers know the exact page surface
                 paint.style = Paint.Style.FILL
+                paint.color = bgColor
+                canvas.drawRect(0f, 0f, pageWidth.toFloat(), pageHeight.toFloat(), paint)
+
                 paint.color = textColor
                 paint.textSize = 18f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -188,7 +191,7 @@ object PdfReportGenerator {
                     canvas.drawText(e.note.replace("\n", " ").take(22), col3 - 8f, y + 17f, paint)
 
                     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                    paint.color = if (e.calculatedAmount < 0) Color.parseColor("#EF4444") else textColor
+                    paint.color = if (e.calculatedAmount < 0) Color.parseColor("#DC2626") else textColor
                     canvas.drawText(ElamalUtils.formatMoney(e.calculatedAmount), col4 - 8f, y + 17f, paint)
 
                     y += rowH
@@ -215,7 +218,7 @@ object PdfReportGenerator {
                 paint.textSize = 10f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
                 canvas.drawText(
-                    "تطبيق «العمل» (com.nanomks.elamal v4.2) - تاريخ الإنشاء: ${dfDateTime.format(Date())}",
+                    "تطبيق «العمل» (com.nanomks.elamal v4.3) • نسق التقرير: ${if (isDarkMode) "داكن" else "فاتح للطباعة"} • ${dfDateTime.format(Date())}",
                     rightX,
                     pageHeight - 28f,
                     paint
@@ -286,6 +289,3 @@ object PdfReportGenerator {
         }
     }
 }
-
-
-
