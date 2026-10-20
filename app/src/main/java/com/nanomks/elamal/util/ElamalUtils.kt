@@ -4,8 +4,11 @@ import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
 import androidx.core.app.NotificationCompat
 import com.nanomks.elamal.MainActivity
 import com.nanomks.elamal.data.ElamalDao
@@ -24,8 +27,64 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlin.math.pow
 
 object ElamalUtils {
+
+    private val LAUNCHER_ALIASES = listOf(
+        "com.nanomks.elamal.LauncherDefault" to "#059669",
+        "com.nanomks.elamal.LauncherAlt" to "#2563EB",
+        "com.nanomks.elamal.LauncherPurple" to "#7C3AED",
+        "com.nanomks.elamal.LauncherTeal" to "#0D9488",
+        "com.nanomks.elamal.LauncherCyan" to "#0284C7",
+        "com.nanomks.elamal.LauncherIndigo" to "#4F46E5",
+        "com.nanomks.elamal.LauncherSlate" to "#475569"
+    )
+
+    fun findClosestIconAlias(hexColor: String): String {
+        val targetColor = runCatching { Color.parseColor(hexColor) }.getOrDefault(Color.parseColor("#059669"))
+        val r1 = Color.red(targetColor)
+        val g1 = Color.green(targetColor)
+        val b1 = Color.blue(targetColor)
+
+        return LAUNCHER_ALIASES.minByOrNull { (_, aliasHex) ->
+            val c2 = Color.parseColor(aliasHex)
+            val r2 = Color.red(c2)
+            val g2 = Color.green(c2)
+            val b2 = Color.blue(c2)
+            (r1 - r2).toDouble().pow(2.0) + (g1 - g2).toDouble().pow(2.0) + (b1 - b2).toDouble().pow(2.0)
+        }?.first ?: "com.nanomks.elamal.LauncherDefault"
+    }
+
+    fun applyLauncherAlias(context: Context, targetAliasName: String) {
+        val pm = context.packageManager
+        val targetComp = ComponentName(context, targetAliasName)
+        if (pm.getComponentEnabledSetting(targetComp) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
+            // Check if others are already disabled
+            val anyOtherEnabled = LAUNCHER_ALIASES.any { (name, _) ->
+                name != targetAliasName && pm.getComponentEnabledSetting(ComponentName(context, name)) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            }
+            if (!anyOtherEnabled) return
+        }
+
+        // Enable target first, then disable others
+        runCatching {
+            pm.setComponentEnabledSetting(
+                targetComp,
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                PackageManager.DONT_KILL_APP
+            )
+            LAUNCHER_ALIASES.forEach { (aliasName, _) ->
+                if (aliasName != targetAliasName) {
+                    pm.setComponentEnabledSetting(
+                        ComponentName(context, aliasName),
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        PackageManager.DONT_KILL_APP
+                    )
+                }
+            }
+        }
+    }
 
     fun calculateHourlyPay(startMillis: Long, endMillis: Long, breakMinutes: Int, hourlyRate: Double): Double {
         val totalMinutes = ((endMillis - startMillis) / 60000L) - breakMinutes
@@ -49,6 +108,10 @@ object ElamalUtils {
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
     }
 
+    fun formatTime(millis: Long): String {
+        return SimpleDateFormat("HH:mm", Locale.US).format(Date(millis))
+    }
+
     fun formatDateTime(millis: Long): String {
         return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(millis))
     }
@@ -69,9 +132,6 @@ object ElamalUtils {
         return if (d != null && pos.index == trimmed.length) d.time else null
     }
 
-    /**
-     * Non-hanging Root Wi-Fi SSID reader with strict 4-second timeout so `su` never blocks background threads.
-     */
     fun getConnectedSsidViaRoot(): String? {
         var process: Process? = null
         return try {
@@ -165,11 +225,6 @@ object ElamalUtils {
         return currentSsid
     }
 
-    /**
-     * Battery-friendly periodic Wi-Fi check:
-     * Uses AlarmManager.RTC (does NOT wake the device from deep sleep at night)
-     * and only schedules if root Wi-Fi tracking is enabled and at least 1 work SSID is configured.
-     */
     fun syncPeriodicWifiPollSchedule(context: Context) {
         val prefs = context.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean("root_wifi_enabled", true)
@@ -196,10 +251,6 @@ object ElamalUtils {
         }
     }
 
-    /**
-     * Zero-battery-cost live timer notification using Android's native Chronometer (`setUsesChronometer(true)`).
-     * Ticks live every second in the notification shade even when the app is completely closed!
-     */
     fun showOrUpdateOngoingWorkNotification(context: Context, startMillis: Long, hourlyRate: Double) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channelId = "elamal_ongoing_session"
@@ -372,7 +423,4 @@ object ElamalUtils {
         sb.append("💰 *الصافي المستحق:* *${formatMoney(totalNet)}*")
         return sb.toString()
     }
-}
-
-
-
+                           }
