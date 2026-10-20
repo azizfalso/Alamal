@@ -9,13 +9,13 @@ import java.math.RoundingMode
 
 @Dao
 interface ElamalDao {
-    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 AND settlementId IS NULL ORDER BY startTime DESC")
+    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 AND settlementId IS NULL ORDER BY id DESC, COALESCE(endTime, startTime) DESC")
     fun getActiveEntries(): Flow<List<WorkEntry>>
 
-    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 ORDER BY startTime DESC")
+    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 ORDER BY id DESC, COALESCE(endTime, startTime) DESC")
     fun getAllNonDeletedEntriesFlow(): Flow<List<WorkEntry>>
 
-    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 ORDER BY startTime DESC")
+    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 ORDER BY id DESC, COALESCE(endTime, startTime) DESC")
     suspend fun getAllEntriesSync(): List<WorkEntry>
 
     @Query("SELECT * FROM work_entries WHERE isDeleted = 0 AND type = 'HOURLY' AND endTime IS NOT NULL AND id != :excludeId AND startTime < :endMillis AND endTime > :startMillis")
@@ -27,13 +27,13 @@ interface ElamalDao {
     @Query("SELECT * FROM work_entries WHERE eventUuid = :uuid LIMIT 1")
     suspend fun getEntryByUuid(uuid: String): WorkEntry?
 
-    @Query("SELECT * FROM settlements ORDER BY timestamp DESC")
+    @Query("SELECT * FROM settlements ORDER BY timestamp DESC, id DESC")
     fun getAllSettlements(): Flow<List<Settlement>>
 
-    @Query("SELECT * FROM settlements ORDER BY timestamp ASC")
+    @Query("SELECT * FROM settlements ORDER BY timestamp ASC, id ASC")
     suspend fun getSettlementsAsc(): List<Settlement>
 
-    @Query("SELECT * FROM wifi_sessions WHERE status != 'IGNORED' ORDER BY startTime DESC")
+    @Query("SELECT * FROM wifi_sessions WHERE status != 'IGNORED' ORDER BY id DESC, startTime DESC")
     fun getVisibleWifiSessions(): Flow<List<WifiSession>>
 
     @Query("SELECT * FROM wifi_sessions ORDER BY startTime ASC")
@@ -140,6 +140,3 @@ abstract class ElamalDatabase : RoomDatabase() {
         }
     }
 }
-
-
-
