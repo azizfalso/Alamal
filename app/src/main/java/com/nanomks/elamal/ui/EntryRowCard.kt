@@ -30,7 +30,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete: () -> Unit) {
+fun EntryRowCard(item: WorkEntry, fontScale: Float = 1.0f, onEdit: () -> Unit, onDelete: () -> Unit) {
     val badgeColor = when (item.type) {
         EntryType.HOURLY -> Color(0xFF059669)
         EntryType.REMOTE -> Color(0xFF2563EB)
@@ -55,7 +55,7 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete
             .clip(RoundedCornerShape(16.dp))
             .clickable { onEdit() },
         shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
+        border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.18f)),
         colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(
@@ -72,8 +72,8 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete
             ) {
                 Box(
                     modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
                         .background(badgeColor.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -92,7 +92,7 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete
                             Text(
                                 text = badgeLabel,
                                 color = Color.White,
-                                fontSize = (10 * fontScale).sp,
+                                fontSize = 10.5f.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                             )
@@ -101,7 +101,7 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete
                             val mins = ((item.endTime - item.startTime) / 60000L) - item.breakMinutes
                             Text(
                                 text = ElamalUtils.formatDurationArabic(mins),
-                                fontSize = (13 * fontScale).sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -117,16 +117,16 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete
 
                     Text(
                         text = timeInfo,
-                        fontSize = 11.sp,
+                        fontSize = 11.5f.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     if (item.note.isNotBlank()) {
                         Text(
                             text = item.note,
-                            fontSize = (12.5f * fontScale).sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                            fontSize = 12.5f.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
                         )
                     }
                 }
@@ -137,8 +137,8 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete
                     Text(
                         text = ElamalUtils.formatMoney(item.calculatedAmount),
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = (16 * fontScale).sp,
-                        color = if (item.calculatedAmount < 0) Color(0xFFDC2626) else Color(0xFF059669)
+                        fontSize = 16.sp,
+                        color = if (item.calculatedAmount < 0) Color(0xFFDC2626) else badgeColor
                     )
                 }
                 IconButton(onClick = onDelete) {
@@ -152,6 +152,3 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete
         }
     }
 }
-
-
-
