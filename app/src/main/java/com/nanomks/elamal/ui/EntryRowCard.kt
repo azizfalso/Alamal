@@ -1,72 +1,33 @@
 package com.nanomks.elamal.ui
 
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.content.SharedPreferences
-import android.content.pm.PackageManager
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
-import android.net.Uri
-import android.os.Build
-import android.os.Bundle
-import android.widget.Toast
-import androidx.activity.compose.ManagedActivityResultLauncher
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import androidx.fragment.app.FragmentActivity
-import com.nanomks.elamal.data.*
-import com.nanomks.elamal.data.ElamalDao
-import com.nanomks.elamal.util.BackupSafManager
+import com.nanomks.elamal.data.EntryType
+import com.nanomks.elamal.data.WorkEntry
 import com.nanomks.elamal.util.ElamalUtils
-import com.nanomks.elamal.util.PdfReportGenerator
-import com.nanomks.elamal.widget.ElamalWidgetReceiver
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
 fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete: () -> Unit) {
@@ -80,35 +41,94 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete
         EntryType.REMOTE -> "عن بعد"
         EntryType.CREDIT -> "كريدي"
     }
-    val df = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US) }
+    val badgeIcon = when (item.type) {
+        EntryType.HOURLY -> Icons.Default.AccessTime
+        EntryType.REMOTE -> Icons.Default.Computer
+        EntryType.CREDIT -> Icons.Default.RemoveCircleOutline
+    }
+    val dfDate = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
+    val dfTime = remember { SimpleDateFormat("HH:mm", Locale.US) }
 
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth().clickable { onEdit() },
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+    OutlinedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onEdit() },
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(
-            modifier = Modifier.padding(14.dp).fillMaxWidth(),
+            modifier = Modifier
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+                .fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .background(badgeColor, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(badgeLabel, color = Color.White, fontSize = (11 * fontScale).sp, fontWeight = FontWeight.Bold)
-                    }
-                    if (item.type == EntryType.HOURLY && item.endTime != null) {
-                        val mins = ((item.endTime - item.startTime) / 60000L) - item.breakMinutes
-                        Text(ElamalUtils.formatDurationArabic(mins), fontSize = (13 * fontScale).sp, fontWeight = FontWeight.Bold)
-                    }
-                    Text(df.format(Date(item.startTime)), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(badgeColor.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(badgeIcon, contentDescription = null, tint = badgeColor, modifier = Modifier.size(22.dp))
                 }
-                if (item.note.isNotBlank()) {
-                    Text(item.note, fontSize = (13 * fontScale).sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            color = badgeColor,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = badgeLabel,
+                                color = Color.White,
+                                fontSize = (10 * fontScale).sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            )
+                        }
+                        if (item.type == EntryType.HOURLY && item.endTime != null) {
+                            val mins = ((item.endTime - item.startTime) / 60000L) - item.breakMinutes
+                            Text(
+                                text = ElamalUtils.formatDurationArabic(mins),
+                                fontSize = (13 * fontScale).sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    val timeInfo = if (item.type == EntryType.HOURLY && item.endTime != null) {
+                        val brkTxt = if (item.breakMinutes > 0) " • استراحة ${item.breakMinutes}د" else ""
+                        "${dfDate.format(Date(item.startTime))} (${dfTime.format(Date(item.startTime))} ← ${dfTime.format(Date(item.endTime))})$brkTxt"
+                    } else {
+                        "${dfDate.format(Date(item.startTime))} • ${dfTime.format(Date(item.startTime))}"
+                    }
+
+                    Text(
+                        text = timeInfo,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (item.note.isNotBlank()) {
+                        Text(
+                            text = item.note,
+                            fontSize = (12.5f * fontScale).sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                        )
+                    }
                 }
             }
 
@@ -122,9 +142,16 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float, onEdit: () -> Unit, onDelete
                     )
                 }
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.DeleteOutline, contentDescription = "حذف", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(
+                        Icons.Default.DeleteOutline,
+                        contentDescription = "حذف",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
                 }
             }
         }
     }
 }
+
+
+

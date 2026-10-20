@@ -12,8 +12,8 @@ android {
         applicationId = "com.nanomks.elamal"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "4.0.0"
+        versionCode = 6
+        versionName = "4.2.0"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -90,3 +90,6 @@ dependencies {
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 }
+
+
+

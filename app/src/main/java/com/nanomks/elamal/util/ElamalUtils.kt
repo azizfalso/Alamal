@@ -1,31 +1,29 @@
 package com.nanomks.elamal.util
 
 import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import androidx.core.app.NotificationCompat
+import com.nanomks.elamal.MainActivity
 import com.nanomks.elamal.data.ElamalDao
 import com.nanomks.elamal.data.EntryType
 import com.nanomks.elamal.data.WifiSession
 import com.nanomks.elamal.data.WorkEntry
 import com.nanomks.elamal.widget.ElamalWidgetReceiver
-import kotlinx.coroutines.delay
 import org.json.JSONArray
 import java.io.BufferedReader
 import java.io.DataOutputStream
 import java.io.InputStreamReader
 import java.math.BigDecimal
 import java.math.RoundingMode
-import java.security.SecureRandom
+import java.text.ParsePosition
 import java.text.SimpleDateFormat
-import java.util.Base64
 import java.util.Date
 import java.util.Locale
-import javax.crypto.Cipher
-import javax.crypto.SecretKeyFactory
-import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.PBEKeySpec
-import javax.crypto.spec.SecretKeySpec
+import java.util.concurrent.TimeUnit
 
 object ElamalUtils {
 
@@ -47,14 +45,37 @@ object ElamalUtils {
         return String.format(Locale.US, "%.2f DH", amount)
     }
 
+    fun formatDate(millis: Long): String {
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
+    }
+
+    fun formatDateTime(millis: Long): String {
+        return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(millis))
+    }
+
+    fun parseStrictDate(input: String): Long? {
+        val trimmed = input.trim()
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+        val pos = ParsePosition(0)
+        val d = sdf.parse(trimmed, pos)
+        return if (d != null && pos.index == trimmed.length) d.time else null
+    }
+
+    fun parseStrictDateTime(input: String): Long? {
+        val trimmed = input.trim()
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).apply { isLenient = false }
+        val pos = ParsePosition(0)
+        val d = sdf.parse(trimmed, pos)
+        return if (d != null && pos.index == trimmed.length) d.time else null
+    }
+
     /**
-     * Multi-fallback Root Wi-Fi SSID reader:
-     * Opens interactive `su` shell (triggers Magisk/KernelSU grant popup if needed)
-     * and checks `cmd wifi status`, `dumpsys wifi`, `wpa_cli`, and `iw`.
+     * Non-hanging Root Wi-Fi SSID reader with strict 4-second timeout so `su` never blocks background threads.
      */
     fun getConnectedSsidViaRoot(): String? {
+        var process: Process? = null
         return try {
-            val process = Runtime.getRuntime().exec("su")
+            process = Runtime.getRuntime().exec("su")
             val os = DataOutputStream(process.outputStream)
             os.writeBytes("cmd wifi status\n")
             os.writeBytes("dumpsys wifi | grep -E 'mWifiInfo|SSID'\n")
@@ -62,16 +83,19 @@ object ElamalUtils {
             os.writeBytes("exit\n")
             os.flush()
 
-            val output = BufferedReader(InputStreamReader(process.inputStream)).readText()
-            process.waitFor()
+            val finished = process.waitFor(4, TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                return null
+            }
 
-            // Pattern 1: SSID: "MyNetwork"
+            val output = BufferedReader(InputStreamReader(process.inputStream)).readText()
+
             val p1 = Regex("""SSID:\s*"([^"]+)"""")
             p1.find(output)?.groupValues?.getOrNull(1)?.let {
                 if (it.isNotBlank() && it != "<unknown ssid>" && it != "0x") return it.trim()
             }
 
-            // Pattern 2: SSID: MyNetwork, BSSID: ...
             val p2 = Regex("""SSID:\s*([^,\n"]+)""")
             p2.find(output)?.groupValues?.getOrNull(1)?.let {
                 val cleaned = it.trim()
@@ -81,12 +105,15 @@ object ElamalUtils {
             }
             null
         } catch (e: Exception) {
+            process?.destroyForcibly()
             null
         }
     }
 
     suspend fun pollAndMergeRootWifi(context: Context, dao: ElamalDao): String? {
         val prefs = context.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("root_wifi_enabled", true)) return null
+
         val configuredList = (prefs.getString("work_ssids", "") ?: "")
             .split(",")
             .map { it.trim() }
@@ -94,6 +121,8 @@ object ElamalUtils {
             .take(6)
 
         val currentSsid = getConnectedSsidViaRoot()
+        if (configuredList.isEmpty()) return currentSsid
+
         val now = System.currentTimeMillis()
         val isWorkWifi = currentSsid != null && configuredList.any { it.equals(currentSsid, ignoreCase = true) }
 
@@ -104,13 +133,12 @@ object ElamalUtils {
 
             if (latest != null && latest.status == "PENDING") {
                 val gapMillis = now - latest.endTime
-                if (latest.isOpen || gapMillis <= 10 * 60_000L) {
+                if (latest.isOpen || gapMillis <= 15 * 60_000L) {
                     val mergedSsid = if (latest.ssid.split("+").any { it.equals(currentSsid, ignoreCase = true) }) {
                         latest.ssid
                     } else {
                         "${latest.ssid}+$currentSsid"
                     }
-                    // Ensure at least 1 minute duration so user sees progress immediately
                     val safeEnd = maxOf(now, latest.startTime + 60_000L)
                     dao.updateWifiSession(latest.copy(ssid = mergedSsid, endTime = safeEnd, isOpen = true))
                     return currentSsid
@@ -135,6 +163,83 @@ object ElamalUtils {
             }
         }
         return currentSsid
+    }
+
+    /**
+     * Battery-friendly periodic Wi-Fi check:
+     * Uses AlarmManager.RTC (does NOT wake the device from deep sleep at night)
+     * and only schedules if root Wi-Fi tracking is enabled and at least 1 work SSID is configured.
+     */
+    fun syncPeriodicWifiPollSchedule(context: Context) {
+        val prefs = context.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
+        val enabled = prefs.getBoolean("root_wifi_enabled", true)
+        val hasSsids = !(prefs.getString("work_ssids", "").isNullOrBlank())
+
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(context, ElamalWidgetReceiver::class.java).apply {
+            action = "com.nanomks.elamal.ACTION_WIFI_PERIODIC_POLL"
+        }
+        val pi = PendingIntent.getBroadcast(
+            context, 404, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        if (enabled && hasSsids) {
+            am.setInexactRepeating(
+                AlarmManager.RTC,
+                System.currentTimeMillis() + AlarmManager.INTERVAL_FIFTEEN_MINUTES,
+                AlarmManager.INTERVAL_FIFTEEN_MINUTES,
+                pi
+            )
+        } else {
+            am.cancel(pi)
+        }
+    }
+
+    /**
+     * Zero-battery-cost live timer notification using Android's native Chronometer (`setUsesChronometer(true)`).
+     * Ticks live every second in the notification shade even when the app is completely closed!
+     */
+    fun showOrUpdateOngoingWorkNotification(context: Context, startMillis: Long, hourlyRate: Double) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channelId = "elamal_ongoing_session"
+        val channel = NotificationChannel(channelId, "جلسة العمل الجارية", NotificationManager.IMPORTANCE_LOW)
+        nm.createNotificationChannel(channel)
+
+        val openIntent = Intent(context, MainActivity::class.java)
+        val openPi = PendingIntent.getActivity(
+            context, 501, openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val clockOutIntent = Intent(context, ElamalWidgetReceiver::class.java).apply {
+            action = "com.nanomks.elamal.ACTION_NOTIF_CLOCK_OUT"
+        }
+        val clockOutPi = PendingIntent.getBroadcast(
+            context, 502, clockOutIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val startClockStr = SimpleDateFormat("HH:mm", Locale.US).format(Date(startMillis))
+        val notif = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.ic_menu_recent_history)
+            .setContentTitle("جلسة عمل جارية (بدأت $startClockStr)")
+            .setContentText("سعر الساعة: ${formatMoney(hourlyRate)} • العداد يعمل تلقائياً")
+            .setWhen(startMillis)
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(openPi)
+            .addAction(android.R.drawable.ic_media_pause, "تسجيل الخروج الآن", clockOutPi)
+            .build()
+
+        nm.notify(902, notif)
+    }
+
+    fun cancelOngoingWorkNotification(context: Context) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.cancel(902)
     }
 
     private fun scheduleWifiDisconnectTimeout(context: Context, triggerAtMillis: Long) {
@@ -192,8 +297,6 @@ object ElamalUtils {
             savedUuids.add(uuid)
         }
 
-        delay(8000L)
-
         val currentJson = prefs.getString("widget_event_queue", "[]") ?: "[]"
         val currentArr = runCatching { JSONArray(currentJson) }.getOrNull() ?: JSONArray()
         val remainingArr = JSONArray()
@@ -237,36 +340,6 @@ object ElamalUtils {
         alarmManager.cancel(pi)
     }
 
-    fun encryptBackup(plainJson: String, password: String): String {
-        if (password.isBlank()) return plainJson
-        val salt = ByteArray(16).apply { SecureRandom().nextBytes(this) }
-        val iv = ByteArray(12).apply { SecureRandom().nextBytes(this) }
-        val spec = PBEKeySpec(password.toCharArray(), salt, 10000, 256)
-        val secret = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
-        val keySpec = SecretKeySpec(secret, "AES")
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, keySpec, GCMParameterSpec(128, iv))
-        val encrypted = cipher.doFinal(plainJson.toByteArray(Charsets.UTF_8))
-        val enc = Base64.getEncoder()
-        return "ELAMAL_ENC_V1:" + enc.encodeToString(salt) + ":" + enc.encodeToString(iv) + ":" + enc.encodeToString(encrypted)
-    }
-
-    fun decryptBackup(payload: String, password: String): String {
-        if (!payload.startsWith("ELAMAL_ENC_V1:")) return payload
-        val parts = payload.split(":")
-        require(parts.size == 4) { "ملف مشفر غير صالح" }
-        val dec = Base64.getDecoder()
-        val salt = dec.decode(parts[1])
-        val iv = dec.decode(parts[2])
-        val cipherBytes = dec.decode(parts[3])
-        val spec = PBEKeySpec(password.toCharArray(), salt, 10000, 256)
-        val secret = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
-        val keySpec = SecretKeySpec(secret, "AES")
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, keySpec, GCMParameterSpec(128, iv))
-        return String(cipher.doFinal(cipherBytes), Charsets.UTF_8)
-    }
-
     fun buildWhatsappFormattedText(entries: List<WorkEntry>, totalNet: Double, carryOver: Double): String {
         val df = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val sb = StringBuilder()
@@ -300,3 +373,6 @@ object ElamalUtils {
         return sb.toString()
     }
 }
+
+
+

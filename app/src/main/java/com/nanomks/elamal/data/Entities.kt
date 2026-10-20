@@ -1,6 +1,8 @@
 package com.nanomks.elamal.data
 
-import androidx.room.*
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.PrimaryKey
 
 enum class EntryType {
     HOURLY, REMOTE, CREDIT
@@ -41,3 +43,6 @@ data class WifiSession(
     val status: String = "PENDING", // PENDING, ADDED, IGNORED
     val isOpen: Boolean = false
 )
+
+
+

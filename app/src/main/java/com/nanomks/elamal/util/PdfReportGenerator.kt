@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.*
 import android.graphics.pdf.PdfDocument
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.nanomks.elamal.data.EntryType
@@ -91,7 +93,7 @@ object PdfReportGenerator {
                     paint.textSize = 15f
                     canvas.drawText(ElamalUtils.formatMoney(netTotal), pageWidth - 48f, cardTop + 48f, paint)
 
-                    // Card 2: Total Hours («23 س 58 د»)
+                    // Card 2: Total Hours
                     val c2Right = pageWidth - 36f - cardW - 14f
                     paint.color = if (isDarkMode) Color.parseColor("#1E3A8A") else Color.parseColor("#DBEAFE")
                     canvas.drawRoundRect(RectF(c2Right - cardW, cardTop, c2Right, cardBottom), 10f, 10f, paint)
@@ -183,7 +185,7 @@ object PdfReportGenerator {
                     } else "-"
                     canvas.drawText(durStr, col2 - 8f, y + 17f, paint)
 
-                    canvas.drawText(e.note.take(22), col3 - 8f, y + 17f, paint)
+                    canvas.drawText(e.note.replace("\n", " ").take(22), col3 - 8f, y + 17f, paint)
 
                     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                     paint.color = if (e.calculatedAmount < 0) Color.parseColor("#EF4444") else textColor
@@ -213,7 +215,7 @@ object PdfReportGenerator {
                 paint.textSize = 10f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
                 canvas.drawText(
-                    "تطبيق «العمل» (com.nanomks.elamal) - تاريخ الإنشاء: ${dfDateTime.format(Date())}",
+                    "تطبيق «العمل» (com.nanomks.elamal v4.2) - تاريخ الإنشاء: ${dfDateTime.format(Date())}",
                     rightX,
                     pageHeight - 28f,
                     paint
@@ -223,6 +225,7 @@ object PdfReportGenerator {
             }
 
             val reportsDir = File(context.cacheDir, "reports").apply { mkdirs() }
+            reportsDir.listFiles()?.forEach { if (System.currentTimeMillis() - it.lastModified() > 3600_000L) it.delete() }
             val pdfFile = File(reportsDir, "Elamal_Report_${System.currentTimeMillis()}.pdf")
             FileOutputStream(pdfFile).use { doc.writeTo(it) }
             doc.close()
@@ -239,7 +242,9 @@ object PdfReportGenerator {
             }
             context.startActivity(chooser)
         } catch (e: Exception) {
-            Toast.makeText(context, "خطأ أثناء إنشاء PDF: ${e.message}", Toast.LENGTH_LONG).show()
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(context, "خطأ أثناء إنشاء PDF: ${e.message}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -257,8 +262,8 @@ object PdfReportGenerator {
                     val mins = if (e.endTime != null) ((e.endTime - e.startTime) / 60000L) - e.breakMinutes else 0L
                     val dur = if (e.type == EntryType.HOURLY) ElamalUtils.formatDurationArabic(mins) else "-"
                     val endStr = e.endTime?.let { df.format(Date(it)) } ?: ""
-                    val cleanNote = e.note.replace(",", " ")
-                    sb.append("${e.id},${e.type},${df.format(Date(e.startTime))},$endStr,${e.breakMinutes},$dur,${e.calculatedAmount},$cleanNote\n")
+                    val escapedNote = "\"" + e.note.replace("\"", "\"\"").replace("\n", " ") + "\""
+                    sb.append("${e.id},${e.type},${df.format(Date(e.startTime))},$endStr,${e.breakMinutes},$dur,${e.calculatedAmount},$escapedNote\n")
                 }
                 fos.write(sb.toString().toByteArray(Charsets.UTF_8))
             }
@@ -275,7 +280,12 @@ object PdfReportGenerator {
             }
             context.startActivity(chooser)
         } catch (e: Exception) {
-            Toast.makeText(context, "خطأ أثناء تصدير CSV: ${e.message}", Toast.LENGTH_LONG).show()
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(context, "خطأ أثناء تصدير CSV: ${e.message}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 }
+
+
+

@@ -14,6 +14,9 @@ import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import com.nanomks.elamal.R
 import com.nanomks.elamal.data.ElamalDatabase
+import com.nanomks.elamal.data.EntryType
+import com.nanomks.elamal.data.WorkEntry
+import com.nanomks.elamal.util.BackupSafManager
 import com.nanomks.elamal.util.ElamalUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +38,15 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
         val prefs = context.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
 
         when (intent.action) {
+            Intent.ACTION_BOOT_COMPLETED -> {
+                ElamalUtils.syncPeriodicWifiPollSchedule(context)
+                val activeStart = prefs.getLong("active_clock_in", 0L)
+                if (activeStart > 0L) {
+                    val rate = prefs.getFloat("hourly_rate", 10f).toDouble()
+                    ElamalUtils.showOrUpdateOngoingWorkNotification(context, activeStart, rate)
+                }
+                refreshAllWidgets(context)
+            }
             "com.nanomks.elamal.ACTION_WIDGET_RESET_TAP" -> {
                 refreshAllWidgets(context)
             }
@@ -44,10 +56,50 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
                     showForgotClockOutNotification(context)
                 }
             }
-            "com.nanomks.elamal.ACTION_WIFI_DISCONNECT_TIMEOUT" -> {
+            "com.nanomks.elamal.ACTION_WIFI_DISCONNECT_TIMEOUT",
+            "com.nanomks.elamal.ACTION_WIFI_PERIODIC_POLL" -> {
+                val pendingResult = goAsync()
                 CoroutineScope(Dispatchers.IO).launch {
-                    val dao = ElamalDatabase.getInstance(context).dao()
-                    ElamalUtils.pollAndMergeRootWifi(context, dao)
+                    try {
+                        val dao = ElamalDatabase.getInstance(context).dao()
+                        ElamalUtils.pollAndMergeRootWifi(context, dao)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            }
+            "com.nanomks.elamal.ACTION_NOTIF_CLOCK_OUT" -> {
+                val activeStart = prefs.getLong("active_clock_in", 0L)
+                if (activeStart > 0L) {
+                    val pendingResult = goAsync()
+                    val now = System.currentTimeMillis()
+                    val rate = prefs.getFloat("hourly_rate", 10f).toDouble()
+
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val dao = ElamalDatabase.getInstance(context).dao()
+                            val pay = ElamalUtils.calculateHourlyPay(activeStart, now, 0, rate)
+                            // 1. Insert entry into Room database FIRST before clearing active_clock_in!
+                            dao.insertEntry(
+                                WorkEntry(
+                                    type = EntryType.HOURLY,
+                                    startTime = activeStart,
+                                    endTime = now,
+                                    hourlyRateAtEntry = rate,
+                                    calculatedAmount = pay,
+                                    note = "خروج سريع من الإشعار"
+                                )
+                            )
+                            // 2. Only after DB commit succeeds, clear state & notifications
+                            prefs.edit().putLong("active_clock_in", 0L).commit()
+                            ElamalUtils.cancelForgotClockOutAlarm(context)
+                            ElamalUtils.cancelOngoingWorkNotification(context)
+                            refreshAllWidgets(context)
+                            BackupSafManager.performSmartBackup(context, dao)
+                        } finally {
+                            pendingResult.finish()
+                        }
+                    }
                 }
             }
             "com.nanomks.elamal.ACTION_WIDGET_CLICK" -> {
@@ -60,26 +112,62 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
 
                 val firstTap = prefs.getLong("widget_first_tap", 0L)
                 if (now - firstTap <= 60_000L) {
-                    prefs.edit().putLong("widget_first_tap", 0L).putLong("widget_last_save", now).apply()
+                    val pendingResult = goAsync()
                     val activeStart = prefs.getLong("active_clock_in", 0L)
-                    if (activeStart == 0L) {
-                        prefs.edit().putLong("active_clock_in", now).apply()
-                        ElamalUtils.scheduleForgotClockOutAlarm(context, now)
-                    } else {
-                        val rate = prefs.getFloat("hourly_rate", 10f).toDouble()
-                        prefs.edit().putLong("active_clock_in", 0L).apply()
-                        ElamalUtils.cancelForgotClockOutAlarm(context)
+                    val rate = prefs.getFloat("hourly_rate", 10f).toDouble()
 
-                        val queueJson = prefs.getString("widget_event_queue", "[]") ?: "[]"
-                        val arr = runCatching { JSONArray(queueJson) }.getOrDefault(JSONArray())
-                        val ev = JSONObject().apply {
-                            put("uuid", UUID.randomUUID().toString())
-                            put("startTime", activeStart)
-                            put("endTime", now)
-                            put("rate", rate)
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            if (activeStart == 0L) {
+                                prefs.edit()
+                                    .putLong("widget_first_tap", 0L)
+                                    .putLong("widget_last_save", now)
+                                    .putLong("active_clock_in", now)
+                                    .commit()
+                                ElamalUtils.scheduleForgotClockOutAlarm(context, now)
+                                ElamalUtils.showOrUpdateOngoingWorkNotification(context, now, rate)
+                            } else {
+                                val uuid = UUID.randomUUID().toString()
+                                val queueJson = prefs.getString("widget_event_queue", "[]") ?: "[]"
+                                val arr = runCatching { JSONArray(queueJson) }.getOrDefault(JSONArray())
+                                val ev = JSONObject().apply {
+                                    put("uuid", uuid)
+                                    put("startTime", activeStart)
+                                    put("endTime", now)
+                                    put("rate", rate)
+                                }
+                                arr.put(ev)
+                                // Persist queue synchronously first
+                                prefs.edit().putString("widget_event_queue", arr.toString()).commit()
+
+                                val dao = ElamalDatabase.getInstance(context).dao()
+                                val pay = ElamalUtils.calculateHourlyPay(activeStart, now, 0, rate)
+                                if (dao.getEntryByUuid(uuid) == null) {
+                                    dao.insertEntry(
+                                        WorkEntry(
+                                            type = EntryType.HOURLY,
+                                            startTime = activeStart,
+                                            endTime = now,
+                                            hourlyRateAtEntry = rate,
+                                            calculatedAmount = pay,
+                                            note = "تسجيل تلقائي من الودجت",
+                                            eventUuid = uuid
+                                        )
+                                    )
+                                }
+                                prefs.edit()
+                                    .putLong("widget_first_tap", 0L)
+                                    .putLong("widget_last_save", now)
+                                    .putLong("active_clock_in", 0L)
+                                    .commit()
+                                ElamalUtils.cancelForgotClockOutAlarm(context)
+                                ElamalUtils.cancelOngoingWorkNotification(context)
+                                BackupSafManager.performSmartBackup(context, dao)
+                            }
+                            refreshAllWidgets(context)
+                        } finally {
+                            pendingResult.finish()
                         }
-                        arr.put(ev)
-                        prefs.edit().putString("widget_event_queue", arr.toString()).apply()
                     }
                 } else {
                     prefs.edit().putLong("widget_first_tap", now).apply()
@@ -92,8 +180,8 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                     )
                     am.set(AlarmManager.RTC, now + 61_000L, pi)
+                    refreshAllWidgets(context)
                 }
-                refreshAllWidgets(context)
             }
         }
     }
@@ -155,3 +243,6 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
         }
     }
 }
+
+
+
