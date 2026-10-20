@@ -25,7 +25,6 @@ import com.nanomks.elamal.util.PdfReportGenerator
 import com.nanomks.elamal.widget.ElamalWidgetReceiver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 /**
@@ -44,8 +43,17 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             2 -> true
             else -> sysDark
         }
+
+    // Explicit PDF theme toggle (defaults to false = Light/Printable mode so PDFs aren't unexpectedly dark)
+    var pdfDarkMode by mutableStateOf(prefs.getBoolean("pdf_dark_mode", false))
+
     var dynamicColor by mutableStateOf(prefs.getBoolean("dynamic_color", false))
     var appColorHex by mutableStateOf(prefs.getString("app_color_hex", "#059669") ?: "#059669")
+    var syncIconWithColor by mutableStateOf(prefs.getBoolean("sync_icon_with_color", true))
+    var activeIconAlias by mutableStateOf(
+        prefs.getString("active_icon_alias", "com.nanomks.elamal.LauncherDefault")
+            ?: "com.nanomks.elamal.LauncherDefault"
+    )
     var fontScale by mutableFloatStateOf(prefs.getFloat("font_scale", 1.0f))
 
     var hourlyRate by mutableDoubleStateOf(prefs.getFloat("hourly_rate", 10.0f).toDouble())
@@ -81,12 +89,19 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var lastDeletedEntry by mutableStateOf<WorkEntry?>(null)
     var statusBanner by mutableStateOf("")
 
+    // Reports Tab interactive scope selector (0=Active Summary, 1=Week, 2=Month, 3=Latest Settlement, 4=Full Archive, 5=Custom Range)
+    var selectedReportScope by mutableIntStateOf(0)
+    var customReportStartMillis by mutableLongStateOf(System.currentTimeMillis() - 14 * 86400_000L)
+    var customReportEndMillis by mutableLongStateOf(System.currentTimeMillis())
+
     var showClockOutDialog by mutableStateOf(false)
     var showManualHourlyDialog by mutableStateOf(false)
     var showRemoteDialog by mutableStateOf(false)
     var showCreditDialog by mutableStateOf(false)
     var showSettleDialog by mutableStateOf(false)
     var showCustomPeriodPdfDialog by mutableStateOf(false)
+    var showCustomColorPickerDialog by mutableStateOf(false)
+    var showPinSetupDialog by mutableStateOf(false)
     var editingEntry by mutableStateOf<WorkEntry?>(null)
     var editingSettlement by mutableStateOf<Settlement?>(null)
     var confirmIgnoreAllWifi by mutableStateOf(false)
@@ -98,10 +113,40 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     private val initCal = Calendar.getInstance()
     var calendarYear by mutableIntStateOf(initCal.get(Calendar.YEAR))
     var calendarMonth by mutableIntStateOf(initCal.get(Calendar.MONTH))
-    var selectedCalendarDay by mutableIntStateOf(-1)
+    var selectedCalendarDay by mutableIntStateOf(initCal.get(Calendar.DAY_OF_MONTH))
 
     var nowMillis by mutableLongStateOf(System.currentTimeMillis())
     var detectedRootSsid by mutableStateOf<String?>(null)
+
+    fun updateAppColor(newHex: String) {
+        val cleanHex = if (newHex.startsWith("#")) newHex.uppercase() else "#${newHex.uppercase()}"
+        appColorHex = cleanHex
+        prefs.edit().putString("app_color_hex", cleanHex).apply()
+        if (syncIconWithColor) {
+            val matchedAlias = ElamalUtils.findClosestIconAlias(cleanHex)
+            activeIconAlias = matchedAlias
+            prefs.edit().putString("active_icon_alias", matchedAlias).apply()
+            ElamalUtils.applyLauncherAlias(app, matchedAlias)
+        }
+    }
+
+    fun toggleSyncIconWithColor(enabled: Boolean) {
+        syncIconWithColor = enabled
+        prefs.edit().putBoolean("sync_icon_with_color", enabled).apply()
+        if (enabled) {
+            val matchedAlias = ElamalUtils.findClosestIconAlias(appColorHex)
+            activeIconAlias = matchedAlias
+            prefs.edit().putString("active_icon_alias", matchedAlias).apply()
+            ElamalUtils.applyLauncherAlias(app, matchedAlias)
+        }
+        // When disabled, we intentionally keep activeIconAlias at its last value!
+    }
+
+    fun setLauncherIconManually(aliasName: String) {
+        activeIconAlias = aliasName
+        prefs.edit().putString("active_icon_alias", aliasName).apply()
+        ElamalUtils.applyLauncherAlias(app, aliasName)
+    }
 
     fun refreshPrefsState() {
         hourlyRate = prefs.getFloat("hourly_rate", 10.0f).toDouble()
@@ -226,14 +271,13 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun saveFixedEntry(type: EntryType, signedAmount: Double, note: String) {
-        val now = System.currentTimeMillis()
+    fun saveFixedEntry(type: EntryType, signedAmount: Double, note: String, customTimestamp: Long = System.currentTimeMillis()) {
         viewModelScope.launch {
             dao.insertEntry(
                 WorkEntry(
                     type = type,
-                    startTime = now,
-                    endTime = now,
+                    startTime = customTimestamp,
+                    endTime = customTimestamp,
                     hourlyRateAtEntry = hourlyRate,
                     calculatedAmount = signedAmount,
                     note = note
@@ -366,7 +410,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
 
     fun exportPdfReportAsync(title: String, reportEntries: List<WorkEntry>, reportSettlements: List<Settlement>) {
         viewModelScope.launch(Dispatchers.IO) {
-            PdfReportGenerator.generateAndSharePdf(app, title, reportEntries, reportSettlements, isDark)
+            PdfReportGenerator.generateAndSharePdf(app, title, reportEntries, reportSettlements, pdfDarkMode)
         }
     }
 
@@ -376,6 +420,3 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         }
     }
 }
-
-
-
