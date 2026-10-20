@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,6 +38,10 @@ fun AppState.LedgerTab() {
     val elapsedActiveMin = if (activeClockIn > 0L) ((nowMillis - activeClockIn) / 60000L).coerceAtLeast(0L) else 0L
     val liveEarnedNow = if (activeClockIn > 0L) ElamalUtils.calculateHourlyPay(activeClockIn, nowMillis, 0, hourlyRate) else 0.0
 
+    val activeHourlySum = entries.filter { it.type == EntryType.HOURLY }.sumOf { it.calculatedAmount }
+    val activeRemoteSum = entries.filter { it.type == EntryType.REMOTE }.sumOf { it.calculatedAmount }
+    val activeCreditSum = kotlin.math.abs(entries.filter { it.type == EntryType.CREDIT }.sumOf { it.calculatedAmount })
+
     // Hero Financial Dashboard Card
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -49,13 +54,13 @@ fun AppState.LedgerTab() {
                 .background(
                     Brush.linearGradient(
                         colors = if (activeClockIn > 0L) {
-                            listOf(Color(0xFF047857), Color(0xFF065F46))
+                            listOf(Color(0xFF047857), Color(0xFF064E3B))
                         } else {
                             listOf(primaryCustom, Color(0xFF0F172A))
                         }
                     )
                 )
-                .padding(20.dp)
+                .padding(horizontal = 20.dp, vertical = 18.dp)
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -63,14 +68,22 @@ fun AppState.LedgerTab() {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         if (activeClockIn > 0L) {
-                            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(0xFF34D399)))
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF34D399))
+                            )
                         }
                         Text(
                             text = if (activeClockIn > 0L) "جلسة عمل جارية الآن..." else "الصافي المستحق حالياً",
-                            color = Color.White.copy(alpha = 0.9f),
-                            fontSize = (13.5f * fontScale).sp,
+                            color = Color.White.copy(alpha = 0.92f),
+                            fontSize = 13.5f.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -81,7 +94,7 @@ fun AppState.LedgerTab() {
                         Text(
                             text = "⏱ ${ElamalUtils.formatDurationArabic(totalMinutesActive + elapsedActiveMin)}",
                             color = Color.White,
-                            fontSize = (12 * fontScale).sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
                         )
@@ -98,7 +111,7 @@ fun AppState.LedgerTab() {
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Text(
                             text = ElamalUtils.formatMoney(totalNet),
-                            fontSize = (34 * fontScale).sp,
+                            fontSize = 32.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White
                         )
@@ -119,27 +132,45 @@ fun AppState.LedgerTab() {
                     }
                 }
 
-                if (lastCarryOver != 0.0 || entries.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
+                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Rich Mini Breakdown inside Hero Card
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "ساعات: ${ElamalUtils.formatMoney(activeHourlySum)}",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (activeRemoteSum > 0.0) {
                         Text(
-                            text = "سجلات الدفتر: ${entries.size}",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 11.5f.sp
+                            text = "عن بعد: +${ElamalUtils.formatMoney(activeRemoteSum)}",
+                            color = Color(0xFF93C5FD),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
-                        if (lastCarryOver != 0.0) {
-                            Text(
-                                text = "مرحّل سابق: ${ElamalUtils.formatMoney(lastCarryOver)}",
-                                color = Color(0xFFFDE68A),
-                                fontSize = 11.5f.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                    }
+                    if (activeCreditSum > 0.0) {
+                        Text(
+                            text = "كريدي: -${ElamalUtils.formatMoney(activeCreditSum)}",
+                            color = Color(0xFFFCA5A5),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    if (lastCarryOver != 0.0) {
+                        Text(
+                            text = "مرحّل: ${ElamalUtils.formatMoney(lastCarryOver)}",
+                            color = Color(0xFFFDE68A),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -148,19 +179,21 @@ fun AppState.LedgerTab() {
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // Main Action Buttons (Clock-In/Out + Manual Past Session + Remote + Credit)
+    // Main Action Buttons (Fixed text clipping issue in Image 1!)
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Button(
             onClick = {
                 if (activeClockIn == 0L) startClockIn() else showClockOutDialog = true
             },
             modifier = Modifier
-                .weight(1.4f)
-                .height(48.dp),
+                .weight(1.45f)
+                .heightIn(min = 50.dp),
             shape = RoundedCornerShape(14.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (activeClockIn == 0L) primaryCustom else Color(0xFFDC2626)
             )
@@ -170,17 +203,19 @@ fun AppState.LedgerTab() {
                 contentDescription = null,
                 modifier = Modifier.size(18.dp)
             )
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = if (activeClockIn == 0L) "تسجيل دخول" else "خروج (${ElamalUtils.formatDurationArabic(elapsedActiveMin)})",
                 fontWeight = FontWeight.Bold,
-                fontSize = 13.sp
+                fontSize = 12.5f.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
         FilledTonalIconButton(
             onClick = { showManualHourlyDialog = true },
-            modifier = Modifier.size(48.dp),
+            modifier = Modifier.size(50.dp),
             shape = RoundedCornerShape(14.dp)
         ) {
             Icon(Icons.Default.MoreTime, contentDescription = "إضافة ساعات يدوية")
@@ -188,26 +223,42 @@ fun AppState.LedgerTab() {
 
         FilledTonalButton(
             onClick = { showRemoteDialog = true },
-            modifier = Modifier.height(48.dp),
+            modifier = Modifier
+                .weight(0.95f)
+                .heightIn(min = 50.dp),
             shape = RoundedCornerShape(14.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp)
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
         ) {
-            Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(15.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Text("عن بعد", fontSize = 12.5f.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "عن بعد",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
 
         FilledTonalButton(
             onClick = { showCreditDialog = true },
-            modifier = Modifier.height(48.dp),
+            modifier = Modifier
+                .weight(0.95f)
+                .heightIn(min = 50.dp),
             shape = RoundedCornerShape(14.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
             colors = ButtonDefaults.filledTonalButtonColors(
                 containerColor = Color(0xFFFEE2E2),
                 contentColor = Color(0xFF991B1B)
             )
         ) {
-            Text("كريدي (-)", fontWeight = FontWeight.Bold, fontSize = 12.5f.sp)
+            Text(
+                "كريدي (-)",
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 
@@ -231,7 +282,7 @@ fun AppState.LedgerTab() {
                         Text(
                             "فترات واي فاي المقترحة (${pendingWifiList.size})",
                             fontWeight = FontWeight.Bold,
-                            fontSize = (13.5f * fontScale).sp
+                            fontSize = 13.5f.sp
                         )
                     }
                     if (pendingWifiList.isNotEmpty()) {
@@ -346,6 +397,3 @@ fun AppState.LedgerTab() {
         }
     }
 }
-
-
-
