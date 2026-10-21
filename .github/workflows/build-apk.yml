@@ -42,23 +42,17 @@ jobs:
           gradle-version: '8.7'
           cache-disabled: true
 
-      - name: Build Signed Release & Debug APK
+      - name: Build Signed Release APK Only
         env:
           KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          gradle assembleRelease assembleDebug --no-daemon --stacktrace
+          gradle assembleRelease --no-daemon --stacktrace
 
       - name: Upload Signed Release APK
         uses: actions/upload-artifact@v4
         with:
           name: Elamal-Release-Signed-APK
           path: app/build/outputs/apk/release/*.apk
-
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Elamal-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
