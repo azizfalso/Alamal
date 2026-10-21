@@ -28,6 +28,18 @@ object BackupSafManager {
             val treeUri = Uri.parse(uriStr)
             val dir = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext "تعذر الوصول إلى مجلد النسخ"
 
+            // Security check (#7): NEVER write unencrypted backup silently if encryption is enabled!
+            val encEnabled = prefs.getBoolean("backup_encrypt_enabled", false)
+            val encPass = ElamalSecurity.getBackupPassword(prefs)
+            if (encEnabled) {
+                if (ElamalSecurity.hasKeystoreDecryptionError(prefs)) {
+                    return@withContext "⚠️ خطأ أمان: تعذر قراءة كلمة المرور من Keystore! أعد إدخال كلمة مرور النسخ في الإعدادات (توقف النسخ لحماية بياناتك)"
+                }
+                if (encPass.isBlank()) {
+                    return@withContext "⚠️ تنبيه: التشفير مفعّل لكن كلمة المرور فارغة! أدخل كلمة مرور التشفير في الإعدادات أولاً"
+                }
+            }
+
             val entries = dao.getAllEntriesSync()
             val settlements = dao.getSettlementsAsc()
             val wifiSessions = dao.getAllWifiSessionsSync()
@@ -52,12 +64,12 @@ object BackupSafManager {
                     val slot = (prefs.getInt("safety_slot_index", 0) % 5) + 1
                     prefs.edit().putInt("safety_slot_index", slot).apply()
                     val safetyName = "elamal_safety_slot_${slot}.json"
-                    writeToDocumentFileSafely(context, dir, safetyName, prevContent)
+                    writeToDocumentFileFast(context, dir, safetyName, prevContent)
                 }
             }
 
             val root = JSONObject()
-            root.put("version", 5)
+            root.put("version", 6)
             root.put("timestamp", System.currentTimeMillis())
             root.put("activeClockIn", activeClockIn)
             root.put("hourlyRate", prefs.getFloat("hourly_rate", 10f).toDouble())
@@ -75,6 +87,9 @@ object BackupSafManager {
                     put("calculatedAmount", e.calculatedAmount)
                     put("note", e.note)
                     put("settlementId", e.settlementId ?: -1L)
+                    if (!e.eventUuid.isNullOrBlank()) {
+                        put("eventUuid", e.eventUuid)
+                    }
                 }
                 entriesArr.put(obj)
             }
@@ -109,10 +124,9 @@ object BackupSafManager {
             }
             root.put("wifiSessions", wifiArr)
 
-            val rawJson = root.toString(2)
-            val encEnabled = prefs.getBoolean("backup_encrypt_enabled", false)
-            val encPass = ElamalSecurity.getBackupPassword(prefs)
-            val finalPayload = if (encEnabled && encPass.isNotBlank()) {
+            // Compact JSON without indentation to reduce file size & I/O cost
+            val rawJson = root.toString()
+            val finalPayload = if (encEnabled) {
                 ElamalSecurity.encryptBackup(rawJson, encPass)
             } else {
                 rawJson
@@ -124,12 +138,15 @@ object BackupSafManager {
                 "elamal_auto_backup.json"
             }
 
-            val writtenUri = writeToDocumentFileSafely(context, dir, targetFileName, finalPayload)
-                ?: return@withContext "فشل إنشاء أو تحديث ملف النسخة الاحتياطية"
+            val writtenUri = writeToDocumentFileFast(context, dir, targetFileName, finalPayload)
+                ?: return@withContext "❌ فشل إنشاء أو تحديث ملف النسخة الاحتياطية"
 
-            val verifyRead = readUriText(context, writtenUri)
-            if (verifyRead != finalPayload) {
-                return@withContext "تحذير: فشل التحقق من سلامة الملف بعد الكتابة!"
+            // Verify only on manual backup to save battery and storage I/O on routine auto-backups
+            if (isManual) {
+                val verifyRead = readUriText(context, writtenUri)
+                if (verifyRead != finalPayload) {
+                    return@withContext "⚠️ تحذير: فشل التحقق من سلامة الملف بعد الكتابة!"
+                }
             }
 
             prefs.edit()
@@ -140,9 +157,9 @@ object BackupSafManager {
                 .apply()
 
             if (dataDecreased && !isManual) {
-                "تم الحفظ وتدوير نسخة أمان (بسبب رصد نقص بيانات) ✓"
+                "تم الحفظ وتدوير نسخة أمان تلقائية ✓"
             } else {
-                "تم النسخ الاحتياطي والتحقق من سلامته بنجاح ✓"
+                "تم الحفظ الاحتياطي بنجاح ✓"
             }
         }
     }
@@ -152,8 +169,14 @@ object BackupSafManager {
         dao: ElamalDao,
         fileName: String = "elamal_auto_backup.json"
     ): String {
-        // Save a manual safety snapshot before restoring
-        performSmartBackup(context, dao, isManual = true)
+        // 1. Check if current DB has data; if so, take a pre-restore backup and verify it succeeded!
+        val currentEntriesCount = withContext(Dispatchers.IO) { dao.getAllEntriesSync().size }
+        if (currentEntriesCount > 0) {
+            val preBackupMsg = performSmartBackup(context, dao, isManual = true)
+            if (preBackupMsg.startsWith("❌") || preBackupMsg.startsWith("⚠️")) {
+                return "توقفت الاستعادة لحماية بياناتك الحالية: فشل حفظ نسخة الأمان الاستباقية ($preBackupMsg)"
+            }
+        }
 
         return backupMutex.withLock {
             withContext(Dispatchers.IO) {
@@ -164,47 +187,41 @@ object BackupSafManager {
                 val target = dir.findFile(fileName) ?: return@withContext "الملف $fileName غير موجود"
 
                 val content = readUriText(context, target.uri)
+                if (content.isBlank()) return@withContext "الملف المختار فارغ أو تالف"
+
                 val pass = ElamalSecurity.getBackupPassword(prefs)
                 val jsonStr = try {
                     ElamalSecurity.decryptBackup(content, pass)
                 } catch (e: Exception) {
-                    return@withContext "فشل فك التشفير: تأكد من كلمة مرور النسخ الاحتياطي"
+                    return@withContext "❌ فشل فك التشفير: ${e.message}"
                 }
 
+                // 2. Parse ALL JSON objects in memory FIRST before touching the database (#3)
                 try {
                     val root = JSONObject(jsonStr)
-                    dao.clearEntries()
-                    dao.clearSettlements()
-
-                    if (root.has("hourlyRate")) {
-                        prefs.edit().putFloat("hourly_rate", root.getDouble("hourlyRate").toFloat()).apply()
-                    }
-                    if (root.has("activeClockIn")) {
-                        prefs.edit().putLong("active_clock_in", root.getLong("activeClockIn")).apply()
-                    }
-                    if (root.has("workSsids")) {
-                        val restoredSsids = root.getString("workSsids")
-                        if (restoredSsids.isNotBlank()) {
-                            prefs.edit().putString("work_ssids", restoredSsids).apply()
-                        }
-                    }
+                    val parsedEntries = mutableListOf<WorkEntry>()
+                    val parsedSettlements = mutableListOf<Settlement>()
+                    val parsedWifi = if (root.has("wifiSessions")) mutableListOf<WifiSession>() else null
 
                     val entriesArr = root.getJSONArray("entries")
                     for (i in 0 until entriesArr.length()) {
                         val o = entriesArr.getJSONObject(i)
-                        val endT = o.getLong("endTime").let { if (it == -1L) null else it }
-                        val setId = o.getLong("settlementId").let { if (it == -1L) null else it }
-                        dao.insertEntry(
+                        val endT = o.optLong("endTime", -1L).let { if (it == -1L) null else it }
+                        val setId = o.optLong("settlementId", -1L).let { if (it == -1L) null else it }
+                        val uuid = o.optString("eventUuid", "").takeIf { it.isNotBlank() }
+                        parsedEntries.add(
                             WorkEntry(
                                 id = o.getLong("id"),
                                 type = EntryType.valueOf(o.getString("type")),
                                 startTime = o.getLong("startTime"),
                                 endTime = endT,
-                                breakMinutes = o.getInt("breakMinutes"),
-                                hourlyRateAtEntry = o.getDouble("hourlyRateAtEntry"),
+                                breakMinutes = o.optInt("breakMinutes", 0),
+                                hourlyRateAtEntry = o.optDouble("hourlyRateAtEntry", 10.0),
                                 calculatedAmount = o.getDouble("calculatedAmount"),
-                                note = o.getString("note"),
-                                settlementId = setId
+                                note = o.optString("note", ""),
+                                settlementId = setId,
+                                isDeleted = false,
+                                eventUuid = uuid
                             )
                         )
                     }
@@ -212,7 +229,7 @@ object BackupSafManager {
                     val settlementsArr = root.getJSONArray("settlements")
                     for (i in 0 until settlementsArr.length()) {
                         val o = settlementsArr.getJSONObject(i)
-                        dao.insertSettlement(
+                        parsedSettlements.add(
                             Settlement(
                                 id = o.getLong("id"),
                                 timestamp = o.getLong("timestamp"),
@@ -220,33 +237,59 @@ object BackupSafManager {
                                 previousCarryOver = o.getDouble("previousCarryOver"),
                                 amountPaid = o.getDouble("amountPaid"),
                                 nextCarryOver = o.getDouble("nextCarryOver"),
-                                note = o.getString("note")
+                                note = o.optString("note", "")
                             )
                         )
                     }
 
-                    if (root.has("wifiSessions")) {
-                        dao.clearWifiSessions()
+                    if (parsedWifi != null) {
                         val wifiArr = root.getJSONArray("wifiSessions")
                         for (i in 0 until wifiArr.length()) {
                             val o = wifiArr.getJSONObject(i)
-                            dao.insertWifiSession(
+                            parsedWifi.add(
                                 WifiSession(
                                     id = o.getLong("id"),
                                     ssid = o.getString("ssid"),
                                     startTime = o.getLong("startTime"),
                                     endTime = o.getLong("endTime"),
-                                    status = o.getString("status"),
+                                    status = o.optString("status", "PENDING"),
                                     isOpen = o.optBoolean("isOpen", false)
                                 )
                             )
                         }
                     }
 
-                    dao.recalculateSettlementsCascade()
-                    "تمت الاستعادة الشاملة بنجاح (مع حفظ نسخة أمان قبل الاستعادة) ✓"
+                    // 3. Execute atomic Room @Transaction replacement (#3)
+                    dao.restoreFullDatabaseAtomic(parsedEntries, parsedSettlements, parsedWifi)
+
+                    // 4. Safely restore preferences and validate activeClockIn (#4)
+                    val editor = prefs.edit()
+                    if (root.has("hourlyRate")) {
+                        editor.putFloat("hourly_rate", root.getDouble("hourlyRate").toFloat())
+                    }
+                    if (root.has("workSsids")) {
+                        val restoredSsids = root.getString("workSsids")
+                        if (restoredSsids.isNotBlank()) {
+                            editor.putString("work_ssids", restoredSsids)
+                        }
+                    }
+
+                    val now = System.currentTimeMillis()
+                    val rawClockIn = if (root.has("activeClockIn")) root.getLong("activeClockIn") else 0L
+                    // Ignore stale activeClockIn older than 20 hours or in the future (#4)
+                    val validClockIn = if (rawClockIn in (now - 20 * 3600_000L)..now) rawClockIn else 0L
+                    editor.putLong("active_clock_in", validClockIn)
+                    editor.apply()
+
+                    if (validClockIn == 0L) {
+                        ElamalUtils.cancelOngoingWorkNotification(context)
+                        ElamalUtils.cancelForgotClockOutAlarm(context)
+                    }
+
+                    val staleNotice = if (rawClockIn > 0L && validClockIn == 0L) " (تم تجاهل جلسة مفتوحة قديمة)" else ""
+                    "تمت الاستعادة الذرية بنجاح ✓$staleNotice"
                 } catch (e: Exception) {
-                    "خطأ أثناء قراءة بيانات النسخة: ${e.message}"
+                    "❌ خطأ في بنية ملف النسخة (لم يتم مسح بياناتك الحالية): ${e.message}"
                 }
             }
         }
@@ -264,29 +307,10 @@ object BackupSafManager {
     }
 
     /**
-     * Safe atomic-style write:
-     * 1. Writes to a temporary staging file first and verifies it.
-     * 2. Overwrites the target file in-place ("wt") without deleting it first, preserving the previous file if anything fails.
+     * Single-pass safe write to reduce storage I/O overhead (#12 & #36).
      */
-    private fun writeToDocumentFileSafely(context: Context, dir: DocumentFile, name: String, content: String): Uri? {
+    private fun writeToDocumentFileFast(context: Context, dir: DocumentFile, name: String, content: String): Uri? {
         val bytes = content.toByteArray(Charsets.UTF_8)
-        val tempName = "$name.tmp"
-        dir.findFile(tempName)?.delete()
-        val tempDoc = dir.createFile("application/octet-stream", tempName)
-        if (tempDoc != null) {
-            val tempOk = runCatching {
-                context.contentResolver.openOutputStream(tempDoc.uri)?.use { out ->
-                    out.write(bytes)
-                    out.flush()
-                }
-                readUriText(context, tempDoc.uri) == content
-            }.getOrDefault(false)
-            if (!tempOk) {
-                tempDoc.delete()
-                return null
-            }
-        }
-
         val targetDoc = dir.findFile(name) ?: dir.createFile("application/json", name) ?: return null
         val writeOk = runCatching {
             val stream = context.contentResolver.openOutputStream(targetDoc.uri, "wt")
@@ -294,11 +318,9 @@ object BackupSafManager {
             stream?.use { out ->
                 out.write(bytes)
                 out.flush()
-            }
+            } ?: return@runCatching false
             true
         }.getOrDefault(false)
-
-        tempDoc?.delete()
         return if (writeOk) targetDoc.uri else null
     }
 
@@ -308,6 +330,3 @@ object BackupSafManager {
         }.getOrDefault("")
     }
 }
-
-
-
