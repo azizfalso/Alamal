@@ -29,6 +29,7 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.ParsePosition
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -42,9 +43,6 @@ object ElamalUtils {
     @Volatile
     private var lastDetectedSsidCache: String? = null
 
-    /**
-     * User preference for Arabic Eastern digits (٠١٢٣٤٥٦٧٨٩) vs Western digits (0123456789) (#19 & #48).
-     */
     @Volatile
     var useArabicDigits: Boolean = false
 
@@ -72,10 +70,6 @@ object ElamalUtils {
         return sb.toString()
     }
 
-    /**
-     * Wraps numbers/dates in Unicode Left-to-Right Isolate (\u2066 ... \u2069)
-     * so they never get scrambled inside RTL Arabic sentences without breaking Compose Row layout.
-     */
     fun ltrIsolate(text: String): String = "\u2066${localizeDigits(text)}\u2069"
 
     fun findClosestIconAlias(hexColor: String): String {
@@ -144,9 +138,29 @@ object ElamalUtils {
         return localizeDigits(raw)
     }
 
+    fun getArabicDayName(millis: Long): String {
+        val cal = Calendar.getInstance().apply { timeInMillis = millis }
+        return when (cal.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.SUNDAY -> "الأحد"
+            Calendar.MONDAY -> "الإثنين"
+            Calendar.TUESDAY -> "الثلاثاء"
+            Calendar.WEDNESDAY -> "الأربعاء"
+            Calendar.THURSDAY -> "الخميس"
+            Calendar.FRIDAY -> "الجمعة"
+            Calendar.SATURDAY -> "السبت"
+            else -> ""
+        }
+    }
+
     fun formatDate(millis: Long): String {
         val raw = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
         return localizeDigits(raw)
+    }
+
+    fun formatDayAndDate(millis: Long): String {
+        val dayName = getArabicDayName(millis)
+        val dateStr = formatDate(millis)
+        return "$dayName ${ltrIsolate(dateStr)}"
     }
 
     fun formatTime(millis: Long): String {
@@ -176,10 +190,6 @@ object ElamalUtils {
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
-    /**
-     * Tries non-root standard Android APIs first (zero battery cost).
-     * Works on non-rooted devices when Location permission is granted (#13 & #35).
-     */
     @Suppress("DEPRECATION")
     private fun getStandardWifiSsidOrNull(context: Context): String? {
         return runCatching {
@@ -203,7 +213,6 @@ object ElamalUtils {
             return null
         }
 
-        // 1. Try standard zero-cost Android WifiInfo first (#13 & #35)
         if (context != null) {
             val stdSsid = getStandardWifiSsidOrNull(context)
             if (stdSsid != null) {
@@ -212,14 +221,12 @@ object ElamalUtils {
             }
         }
 
-        // 2. Check if user allows root `su` fallback (#35 & #48)
         val allowRootSu = context?.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
             ?.getBoolean("wifi_use_root_su", true) ?: true
         if (!allowRootSu) {
             return lastDetectedSsidCache
         }
 
-        // 3. Throttle `su` invocations: if called within 15 seconds and not forced, reuse cached SSID
         val now = System.currentTimeMillis()
         if (!forceFresh && now - lastRootPollMillis < 15_000L) {
             return lastDetectedSsidCache
@@ -325,9 +332,6 @@ object ElamalUtils {
         return currentSsid
     }
 
-    /**
-     * Supports waking alarm (RTC_WAKEUP) or battery-saving non-waking alarm (RTC) based on user setting (#40 & #48).
-     */
     fun syncPeriodicWifiPollSchedule(context: Context) {
         val prefs = context.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean("root_wifi_enabled", true)
@@ -505,7 +509,7 @@ object ElamalUtils {
             sb.append("لا توجد سجلات نشطة حالياً.\n")
         } else {
             for (e in entries) {
-                val dateStr = formatDate(e.startTime)
+                val dayAndDateStr = "${getArabicDayName(e.startTime)} ${formatDate(e.startTime)}"
                 val typeStr = when (e.type) {
                     EntryType.HOURLY -> {
                         val m = if (e.endTime != null) ((e.endTime - e.startTime) / 60000L) - e.breakMinutes else 0L
@@ -516,7 +520,7 @@ object ElamalUtils {
                     EntryType.CREDIT -> "كريدي (-)"
                 }
                 val notePart = if (e.note.isNotBlank()) " - ${e.note}" else ""
-                sb.append("• $dateStr | $typeStr: *${formatMoney(e.calculatedAmount)}*$notePart\n")
+                sb.append("• $dayAndDateStr | $typeStr: *${formatMoney(e.calculatedAmount)}*$notePart\n")
             }
         }
         sb.append("━━━━━━━━━━━━━━\n")
