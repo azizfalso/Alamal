@@ -55,12 +55,15 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             ?: "com.nanomks.elamal.LauncherDefault"
     )
     var fontScale by mutableFloatStateOf(prefs.getFloat("font_scale", 1.0f))
+    var useArabicDigits by mutableStateOf(prefs.getBoolean("use_arabic_digits", false))
 
     var hourlyRate by mutableDoubleStateOf(prefs.getFloat("hourly_rate", 10.0f).toDouble())
     var prefsRefreshCounter by mutableIntStateOf(0)
     var activeClockIn by mutableLongStateOf(prefs.getLong("active_clock_in", 0L))
     var widgetEnabled by mutableStateOf(prefs.getBoolean("widget_enabled", true))
     var rootWifiEnabled by mutableStateOf(prefs.getBoolean("root_wifi_enabled", true))
+    var wifiUseRootSu by mutableStateOf(prefs.getBoolean("wifi_use_root_su", true))
+    var wifiWakeAlarm by mutableStateOf(prefs.getBoolean("wifi_wake_alarm", true))
     var searchFilterEnabled by mutableStateOf(prefs.getBoolean("search_filter_enabled", true))
     var forgotAlarmHours by mutableIntStateOf(prefs.getInt("forgot_alarm_hours", 12))
     var workSsids by mutableStateOf(prefs.getString("work_ssids", "") ?: "")
@@ -77,7 +80,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var colorScheme: ColorScheme = lightColorScheme()
     lateinit var folderPicker: ManagedActivityResultLauncher<Uri?, Uri?>
 
-    // Single-source Flow state collected once in ViewModel (#26 & #39)
     var entries by mutableStateOf<List<WorkEntry>>(emptyList())
         private set
     var allEntries by mutableStateOf<List<WorkEntry>>(emptyList())
@@ -88,6 +90,12 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         private set
     var wifiSessions by mutableStateOf<List<WifiSession>>(emptyList())
         private set
+
+    /**
+     * Tracks when the user last deleted an item in this session so the quick "Undo" button in TopAppBar
+     * only stays prominent for recent deletions (15 minutes), while older deleted items remain safely accessible in Trash (#43).
+     */
+    var lastSoftDeleteMillis by mutableLongStateOf(0L)
 
     val pendingWifiList: List<WifiSession>
         get() = wifiSessions.filter { it.status == "PENDING" }
@@ -110,6 +118,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var showCustomPeriodPdfDialog by mutableStateOf(false)
     var showCustomColorPickerDialog by mutableStateOf(false)
     var showPinSetupDialog by mutableStateOf(false)
+    var showTrashBinDialog by mutableStateOf(false)
 
     var editingEntry by mutableStateOf<WorkEntry?>(null)
     var pendingDeleteEntry by mutableStateOf<WorkEntry?>(null)
@@ -132,6 +141,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     private var autoBackupJob: Job? = null
 
     init {
+        ElamalUtils.useArabicDigits = useArabicDigits
         viewModelScope.launch {
             dao.getActiveEntries().collectLatest { entries = it }
         }
@@ -139,7 +149,13 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             dao.getAllNonDeletedEntriesFlow().collectLatest { allEntries = it }
         }
         viewModelScope.launch {
-            dao.getDeletedEntriesFlow().collectLatest { deletedEntries = it }
+            dao.getDeletedEntriesFlow().collectLatest {
+                deletedEntries = it
+                val newestDelTime = it.firstOrNull()?.deletedAt ?: 0L
+                if (newestDelTime > lastSoftDeleteMillis) {
+                    lastSoftDeleteMillis = newestDelTime
+                }
+            }
         }
         viewModelScope.launch {
             dao.getAllSettlements().collectLatest { settlements = it }
@@ -147,6 +163,13 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             dao.getVisibleWifiSessions().collectLatest { wifiSessions = it }
         }
+    }
+
+    fun toggleArabicDigits(enabled: Boolean) {
+        useArabicDigits = enabled
+        ElamalUtils.useArabicDigits = enabled
+        prefs.edit().putBoolean("use_arabic_digits", enabled).apply()
+        prefsRefreshCounter += 1
     }
 
     fun showNotice(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
@@ -163,9 +186,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Coalesces rapid database edits into a single background backup after 3.5 seconds (#12 & #36).
-     */
     fun scheduleSmartBackupDebounced() {
         autoBackupJob?.cancel()
         autoBackupJob = viewModelScope.launch {
@@ -413,29 +433,57 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     fun confirmSoftDeleteEntry() {
         val item = pendingDeleteEntry ?: return
         pendingDeleteEntry = null
+        val delTime = System.currentTimeMillis()
+        lastSoftDeleteMillis = delTime
         viewModelScope.launch {
-            dao.updateEntry(item.copy(isDeleted = true))
+            dao.updateEntry(item.copy(isDeleted = true, deletedAt = delTime))
             if (item.settlementId != null) {
                 dao.recalculateSettlementsCascade()
             }
             scheduleSmartBackupDebounced()
             showNotice(
-                message = "تم نقل السجل إلى المحذوفات المؤقتة",
+                message = "تم نقل السجل إلى سلة المحذوفات",
                 actionLabel = "تراجع",
-                onAction = { undoLastDelete() }
+                onAction = { restoreDeletedEntry(item) }
             )
         }
     }
 
     fun undoLastDelete() {
         val toRestore = deletedEntries.firstOrNull() ?: return
+        restoreDeletedEntry(toRestore)
+    }
+
+    fun restoreDeletedEntry(item: WorkEntry) {
         viewModelScope.launch {
-            dao.updateEntry(toRestore.copy(isDeleted = false))
-            if (toRestore.settlementId != null) {
+            dao.updateEntry(item.copy(isDeleted = false, deletedAt = null))
+            if (item.settlementId != null) {
                 dao.recalculateSettlementsCascade()
             }
             scheduleSmartBackupDebounced()
-            showNotice("تم استرجاع السجل المحذوف ✓")
+            showNotice("تم استرجاع السجل بنجاح ✓")
+        }
+    }
+
+    fun deleteEntryForever(item: WorkEntry) {
+        viewModelScope.launch {
+            dao.deleteEntryPermanently(item)
+            if (item.settlementId != null) {
+                dao.recalculateSettlementsCascade()
+            }
+            showNotice("تم حذف السجل نهائياً")
+        }
+    }
+
+    /**
+     * Permanently empties all soft-deleted entries from the Trash Bin (#42).
+     */
+    fun emptyTrashBinPermanently() {
+        viewModelScope.launch {
+            dao.purgeSoftDeletedEntries()
+            lastSoftDeleteMillis = 0L
+            showTrashBinDialog = false
+            showNotice("تم إفراغ سلة المحذوفات نهائياً ✓")
         }
     }
 
