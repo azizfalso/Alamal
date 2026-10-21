@@ -1,6 +1,5 @@
 package com.nanomks.elamal.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,11 +14,11 @@ import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -31,9 +30,6 @@ import com.nanomks.elamal.util.ElamalSecurity
 import com.nanomks.elamal.util.ElamalUtils
 import java.util.*
 
-/**
- * Pure Material 3 Compose Date & Time selector that respects Dark Mode, Light Mode, and Custom Theme Colors!
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InteractiveDateTimeSelector(
@@ -43,8 +39,8 @@ fun InteractiveDateTimeSelector(
     includeTime: Boolean = true,
     onTimestampChange: (Long) -> Unit
 ) {
-    var showComposeDatePicker by remember { mutableStateOf(false) }
-    var showComposeTimePicker by remember { mutableStateOf(false) }
+    var showComposeDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showComposeTimePicker by rememberSaveable { mutableStateOf(false) }
 
     val cal = remember(timestampMillis) {
         Calendar.getInstance().apply { timeInMillis = timestampMillis }
@@ -82,9 +78,7 @@ fun InteractiveDateTimeSelector(
                     Text("إلغاء")
                 }
             },
-            colors = DatePickerDefaults.colors(
-                containerColor = MaterialTheme.colorScheme.surface
-            )
+            colors = DatePickerDefaults.colors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             DatePicker(
                 state = datePickerState,
@@ -119,7 +113,7 @@ fun InteractiveDateTimeSelector(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Schedule, contentDescription = null, tint = accentColor)
+                    Icon(Icons.Default.Schedule, contentDescription = "اختر الوقت", tint = accentColor)
                     Text("اختر الوقت (24 ساعة)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             },
@@ -253,14 +247,16 @@ fun InteractiveDateTimeSelector(
                     border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
                 ) {
-                    Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp), tint = accentColor)
+                    Icon(Icons.Default.CalendarMonth, contentDescription = "التاريخ", modifier = Modifier.size(16.dp), tint = accentColor)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = ElamalUtils.formatDate(timestampMillis),
-                        fontSize = 12.5f.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Text(
+                            text = ElamalUtils.formatDate(timestampMillis),
+                            fontSize = 12.5f.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
                 }
 
                 if (includeTime) {
@@ -275,14 +271,16 @@ fun InteractiveDateTimeSelector(
                         border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
                     ) {
-                        Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp), tint = accentColor)
+                        Icon(Icons.Default.Schedule, contentDescription = "الوقت", modifier = Modifier.size(16.dp), tint = accentColor)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = ElamalUtils.formatTime(timestampMillis),
-                            fontSize = 12.5f.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = ElamalUtils.formatTime(timestampMillis),
+                                fontSize = 12.5f.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }
@@ -292,20 +290,78 @@ fun InteractiveDateTimeSelector(
 
 @Composable
 fun AppState.AppDialogs() {
-    val context = LocalContext.current
+
+    // 1. Delete Entry Confirmation Dialog (#1)
+    if (pendingDeleteEntry != null) {
+        val item = pendingDeleteEntry!!
+        AlertDialog(
+            onDismissRequest = { pendingDeleteEntry = null },
+            containerColor = colorScheme.surface,
+            shape = RoundedCornerShape(20.dp),
+            icon = { Icon(Icons.Default.DeleteForever, contentDescription = "تأكيد الحذف", tint = Color(0xFFDC2626)) },
+            title = { Text("تأكيد حذف السجل", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "هل تريد نقل هذا السجل (${ElamalUtils.formatMoney(item.calculatedAmount)} بتاريخ ${ElamalUtils.formatDate(item.startTime)}) إلى المحذوفات؟\nيمكنك التراجع عن الحذف من الشريط العلوي."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { confirmSoftDeleteEntry() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("نعم، حذف السجل") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteEntry = null }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    // 2. Undo Latest Settlement Confirmation Dialog (#2)
+    if (confirmUndoLatestSettlement) {
+        val latest = settlements.firstOrNull()
+        AlertDialog(
+            onDismissRequest = { confirmUndoLatestSettlement = false },
+            containerColor = colorScheme.surface,
+            shape = RoundedCornerShape(20.dp),
+            icon = { Icon(Icons.Default.Undo, contentDescription = "تأكيد التراجع عن الدفعة", tint = Color(0xFFDC2626)) },
+            title = { Text("تأكيد التراجع عن آخر دفعة", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "هل أنت متأكد من إلغاء الدفعة الأخيرة (${ElamalUtils.formatMoney(latest?.amountPaid ?: 0.0)}) وإعادة جميع سجلاتها المؤرشفة إلى الدفتر النشط؟"
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { performConfirmedUndoLatestSettlement() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("نعم، التراجع وإعادة السجلات") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmUndoLatestSettlement = false }) { Text("إلغاء") }
+            }
+        )
+    }
 
     // Edit Active Running Clock-In Start Time Dialog
     if (showEditActiveClockInDialog && activeClockIn > 0L) {
-        var newActiveStart by remember(activeClockIn) { mutableLongStateOf(activeClockIn) }
+        var newActiveStart by rememberSaveable(activeClockIn) { mutableLongStateOf(activeClockIn) }
 
         AlertDialog(
             onDismissRequest = { showEditActiveClockInDialog = false },
             containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
-            icon = { Icon(Icons.Default.HistoryToggleOff, contentDescription = null, tint = primaryCustom) },
+            icon = { Icon(Icons.Default.HistoryToggleOff, contentDescription = "تعديل البداية", tint = primaryCustom) },
             title = { Text("تعديل وقت بداية الجلسة الجارية", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Text(
                         "إذا نسيت تسجيل الدخول في بداية دوامك، يمكنك تعديل وقت البداية الفعلي هنا:",
                         fontSize = 12.sp,
@@ -324,7 +380,7 @@ fun AppState.AppDialogs() {
                 Button(
                     onClick = {
                         if (newActiveStart > System.currentTimeMillis()) {
-                            Toast.makeText(context, "لا يمكن أن يكون وقت البداية في المستقبل", Toast.LENGTH_SHORT).show()
+                            showNotice("لا يمكن أن يكون وقت البداية في المستقبل")
                             return@Button
                         }
                         updateActiveClockInStart(newActiveStart)
@@ -348,7 +404,7 @@ fun AppState.AppDialogs() {
             },
             containerColor = colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
-            icon = { Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFFD97706)) },
+            icon = { Icon(Icons.Default.WarningAmber, contentDescription = "تحذير تداخل", tint = Color(0xFFD97706)) },
             title = { Text("تنبيه تداخل في الأوقات", fontWeight = FontWeight.Bold) },
             text = { Text(overlapWarningMessage!!) },
             confirmButton = {
@@ -379,10 +435,10 @@ fun AppState.AppDialogs() {
             onDismissRequest = { confirmRestoreFileName = null },
             containerColor = colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
-            icon = { Icon(Icons.Default.Restore, contentDescription = null, tint = primaryCustom) },
+            icon = { Icon(Icons.Default.Restore, contentDescription = "استعادة نسخة", tint = primaryCustom) },
             title = { Text("تأكيد استعادة النسخة الاحتياطية", fontWeight = FontWeight.Bold) },
             text = {
-                Text("سيتم حفظ نسخة أمان من بياناتك الحالية أولاً، ثم استبدال السجلات والدفعات بالنسخة:\n($targetFile)\nهل تود المتابعة؟")
+                Text("سيتم حفظ نسخة أمان من بياناتك الحالية وفحصها أولاً، ثم استبدال السجلات والدفعات داخل معاملة آمنة بالنسخة:\n($targetFile)\nهل تود المتابعة؟")
             },
             confirmButton = {
                 Button(
@@ -398,17 +454,22 @@ fun AppState.AppDialogs() {
 
     // Custom Date Range Dialog
     if (showCustomPeriodPdfDialog) {
-        var fromMillis by remember { mutableLongStateOf(customReportStartMillis) }
-        var toMillis by remember { mutableLongStateOf(customReportEndMillis) }
+        var fromMillis by rememberSaveable { mutableLongStateOf(customReportStartMillis) }
+        var toMillis by rememberSaveable { mutableLongStateOf(customReportEndMillis) }
 
         AlertDialog(
             onDismissRequest = { showCustomPeriodPdfDialog = false },
             containerColor = colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
-            icon = { Icon(Icons.Default.DateRange, contentDescription = null, tint = primaryCustom) },
+            icon = { Icon(Icons.Default.DateRange, contentDescription = "فترة مخصصة", tint = primaryCustom) },
             title = { Text("تحديد فترة مخصصة للتقارير", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     InteractiveDateTimeSelector(
                         label = "من تاريخ البداية:",
                         timestampMillis = fromMillis,
@@ -432,7 +493,7 @@ fun AppState.AppDialogs() {
                             val startDay = ElamalUtils.parseStrictDate(ElamalUtils.formatDate(fromMillis)) ?: fromMillis
                             val endDay = (ElamalUtils.parseStrictDate(ElamalUtils.formatDate(toMillis)) ?: toMillis) + 86399_000L
                             if (endDay < startDay) {
-                                Toast.makeText(context, "تاريخ النهاية يجب أن يكون بعد البداية", Toast.LENGTH_SHORT).show()
+                                showNotice("تاريخ النهاية يجب أن يكون بعد البداية")
                                 return@OutlinedButton
                             }
                             customReportStartMillis = startDay
@@ -448,7 +509,7 @@ fun AppState.AppDialogs() {
                             val startDay = ElamalUtils.parseStrictDate(ElamalUtils.formatDate(fromMillis)) ?: fromMillis
                             val endDay = (ElamalUtils.parseStrictDate(ElamalUtils.formatDate(toMillis)) ?: toMillis) + 86399_000L
                             if (endDay < startDay) {
-                                Toast.makeText(context, "تاريخ النهاية يجب أن يكون بعد البداية", Toast.LENGTH_SHORT).show()
+                                showNotice("تاريخ النهاية يجب أن يكون بعد البداية")
                                 return@Button
                             }
                             customReportStartMillis = startDay
@@ -470,13 +531,13 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // Add Manual Past Hourly Session Dialog
+    // Add Manual Past Hourly Session Dialog (#22 rememberSaveable & #23 imePadding)
     if (showManualHourlyDialog) {
         val now = System.currentTimeMillis()
-        var startMillis by remember { mutableLongStateOf(now - 4 * 3600_000L) }
-        var endMillis by remember { mutableLongStateOf(now) }
-        var breakStr by remember { mutableStateOf("0") }
-        var noteStr by remember { mutableStateOf("") }
+        var startMillis by rememberSaveable { mutableLongStateOf(now - 4 * 3600_000L) }
+        var endMillis by rememberSaveable { mutableLongStateOf(now) }
+        var breakStr by rememberSaveable { mutableStateOf("0") }
+        var noteStr by rememberSaveable { mutableStateOf("") }
 
         val breakMinutes = breakStr.toIntOrNull() ?: 0
         val netDurationMin = (((endMillis - startMillis) / 60000L) - breakMinutes).coerceAtLeast(0L)
@@ -488,11 +549,13 @@ fun AppState.AppDialogs() {
             onDismissRequest = { showManualHourlyDialog = false },
             containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
-            icon = { Icon(Icons.Default.MoreTime, contentDescription = null, tint = primaryCustom) },
+            icon = { Icon(Icons.Default.MoreTime, contentDescription = "إضافة ساعات يدوية", tint = primaryCustom) },
             title = { Text("إضافة جلسة ساعات يدوية", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     InteractiveDateTimeSelector(
@@ -541,18 +604,20 @@ fun AppState.AppDialogs() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (endMillis > startMillis) "⏱ الصافي: ${ElamalUtils.formatDurationArabic(netDurationMin)}" else "⚠️ وقت النهاية يجب أن يسبق البداية",
+                                text = if (endMillis > startMillis) "⏱ الصافي: ${ElamalUtils.formatDurationArabic(netDurationMin)}" else "⚠️ وقت النهاية يجب أن يلي البداية",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (endMillis > startMillis) primaryCustom else Color(0xFFEF4444)
                             )
                             if (endMillis > startMillis) {
-                                Text(
-                                    text = ElamalUtils.formatMoney(previewAmount),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = primaryCustom
-                                )
+                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                    Text(
+                                        text = ElamalUtils.formatMoney(previewAmount),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = primaryCustom
+                                    )
+                                }
                             }
                         }
                     }
@@ -580,7 +645,7 @@ fun AppState.AppDialogs() {
                 Button(
                     onClick = {
                         if (endMillis <= startMillis) {
-                            Toast.makeText(context, "تأكد أن وقت النهاية بعد وقت البداية", Toast.LENGTH_LONG).show()
+                            showNotice("تأكد أن وقت النهاية بعد وقت البداية")
                             return@Button
                         }
                         val brk = breakStr.toIntOrNull() ?: 0
@@ -598,21 +663,23 @@ fun AppState.AppDialogs() {
     // Edit Existing Entry Dialog
     if (editingEntry != null) {
         val target = editingEntry!!
-        var startMillis by remember(target.id) { mutableLongStateOf(target.startTime) }
-        var endMillis by remember(target.id) { mutableLongStateOf(target.endTime ?: target.startTime) }
-        var noteStr by remember(target.id) { mutableStateOf(target.note) }
-        var breakStr by remember(target.id) { mutableStateOf(target.breakMinutes.toString()) }
-        var amountStr by remember(target.id) { mutableStateOf(kotlin.math.abs(target.calculatedAmount).toString()) }
+        var startMillis by rememberSaveable(target.id) { mutableLongStateOf(target.startTime) }
+        var endMillis by rememberSaveable(target.id) { mutableLongStateOf(target.endTime ?: target.startTime) }
+        var noteStr by rememberSaveable(target.id) { mutableStateOf(target.note) }
+        var breakStr by rememberSaveable(target.id) { mutableStateOf(target.breakMinutes.toString()) }
+        var amountStr by rememberSaveable(target.id) { mutableStateOf(kotlin.math.abs(target.calculatedAmount).toString()) }
 
         AlertDialog(
             onDismissRequest = { editingEntry = null },
             containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
-            icon = { Icon(Icons.Default.Edit, contentDescription = null, tint = primaryCustom) },
+            icon = { Icon(Icons.Default.Edit, contentDescription = "تعديل السجل", tint = primaryCustom) },
             title = { Text("تعديل السجل وتفاصيل الوقت", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     InteractiveDateTimeSelector(
@@ -667,7 +734,7 @@ fun AppState.AppDialogs() {
                     onClick = {
                         val effectiveEnd = if (target.type == EntryType.HOURLY) endMillis else startMillis
                         if (target.type == EntryType.HOURLY && effectiveEnd <= startMillis) {
-                            Toast.makeText(context, "تأكد أن وقت النهاية بعد وقت البداية", Toast.LENGTH_SHORT).show()
+                            showNotice("تأكد أن وقت النهاية بعد وقت البداية")
                             return@Button
                         }
                         val brk = breakStr.toIntOrNull() ?: target.breakMinutes
@@ -705,9 +772,9 @@ fun AppState.AppDialogs() {
 
     if (editingSettlement != null) {
         val target = editingSettlement!!
-        var paidInput by remember(target.id) { mutableStateOf(target.amountPaid.toString()) }
-        var noteInput by remember(target.id) { mutableStateOf(target.note) }
-        var settlementTimeMillis by remember(target.id) { mutableLongStateOf(target.timestamp) }
+        var paidInput by rememberSaveable(target.id) { mutableStateOf(target.amountPaid.toString()) }
+        var noteInput by rememberSaveable(target.id) { mutableStateOf(target.note) }
+        var settlementTimeMillis by rememberSaveable(target.id) { mutableLongStateOf(target.timestamp) }
 
         AlertDialog(
             onDismissRequest = { editingSettlement = null },
@@ -715,7 +782,12 @@ fun AppState.AppDialogs() {
             shape = RoundedCornerShape(20.dp),
             title = { Text("تعديل دفعة قديمة (مع تحديث المرحّل)", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     InteractiveDateTimeSelector(
                         label = "تاريخ ووقت الدفعة:",
                         timestampMillis = settlementTimeMillis,
@@ -758,8 +830,8 @@ fun AppState.AppDialogs() {
     }
 
     if (showClockOutDialog) {
-        var breakMinStr by remember { mutableStateOf("0") }
-        var noteStr by remember { mutableStateOf("") }
+        var breakMinStr by rememberSaveable { mutableStateOf("0") }
+        var noteStr by rememberSaveable { mutableStateOf("") }
         val elapsedMin = if (activeClockIn > 0L) ((System.currentTimeMillis() - activeClockIn) / 60000L).coerceAtLeast(1L) else 0L
 
         AlertDialog(
@@ -768,7 +840,12 @@ fun AppState.AppDialogs() {
             shape = RoundedCornerShape(20.dp),
             title = { Text("تسجيل الخروج وإنهاء الجلسة", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Surface(
                         color = primaryCustom.copy(alpha = 0.14f),
                         shape = RoundedCornerShape(12.dp),
@@ -784,7 +861,7 @@ fun AppState.AppDialogs() {
                     }
                     OutlinedTextField(
                         value = breakMinStr,
-                        onValueChange = { breakMinStr = it },
+                        onValueChange = { if (it.all { c -> c.isDigit() }) breakMinStr = it },
                         label = { Text("مدة الاستراحة (بالدقائق)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
@@ -818,18 +895,23 @@ fun AppState.AppDialogs() {
 
     // Remote Work Dialog
     if (showRemoteDialog) {
-        var amountStr by remember { mutableStateOf("") }
-        var noteStr by remember { mutableStateOf("") }
-        var selectedTimeMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+        var amountStr by rememberSaveable { mutableStateOf("") }
+        var noteStr by rememberSaveable { mutableStateOf("") }
+        var selectedTimeMillis by rememberSaveable { mutableLongStateOf(System.currentTimeMillis()) }
 
         AlertDialog(
             onDismissRequest = { showRemoteDialog = false },
             containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
-            icon = { Icon(Icons.Default.Computer, contentDescription = null, tint = Color(0xFF2563EB)) },
+            icon = { Icon(Icons.Default.Computer, contentDescription = "عمل عن بعد", tint = Color(0xFF2563EB)) },
             title = { Text("إضافة عمل عن بعد (أجرة ثابتة)", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     InteractiveDateTimeSelector(
                         label = "تاريخ ووقت العمل عن بعد:",
                         timestampMillis = selectedTimeMillis,
@@ -863,7 +945,7 @@ fun AppState.AppDialogs() {
                         if (amt > 0) {
                             saveFixedEntry(EntryType.REMOTE, amt, noteStr, selectedTimeMillis)
                         } else {
-                            Toast.makeText(context, "أدخل مبلغاً صحيحاً", Toast.LENGTH_SHORT).show()
+                            showNotice("أدخل مبلغاً صحيحاً أكبر من صفر")
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
@@ -878,18 +960,23 @@ fun AppState.AppDialogs() {
 
     // Credit / Advance Dialog
     if (showCreditDialog) {
-        var creditStr by remember { mutableStateOf("") }
-        var noteStr by remember { mutableStateOf("") }
-        var selectedTimeMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+        var creditStr by rememberSaveable { mutableStateOf("") }
+        var noteStr by rememberSaveable { mutableStateOf("") }
+        var selectedTimeMillis by rememberSaveable { mutableLongStateOf(System.currentTimeMillis()) }
 
         AlertDialog(
             onDismissRequest = { showCreditDialog = false },
             containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
-            icon = { Icon(Icons.Default.RemoveCircleOutline, contentDescription = null, tint = Color(0xFFDC2626)) },
+            icon = { Icon(Icons.Default.RemoveCircleOutline, contentDescription = "إضافة كريدي", tint = Color(0xFFDC2626)) },
             title = { Text("إضافة كريدي / سلفة (يُخصم من الصافي)", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     InteractiveDateTimeSelector(
                         label = "تاريخ ووقت الكريدي:",
                         timestampMillis = selectedTimeMillis,
@@ -923,7 +1010,7 @@ fun AppState.AppDialogs() {
                         if (amt > 0) {
                             saveFixedEntry(EntryType.CREDIT, -amt, noteStr, selectedTimeMillis)
                         } else {
-                            Toast.makeText(context, "أدخل قيمة الكريدي", Toast.LENGTH_SHORT).show()
+                            showNotice("أدخل قيمة الكريدي")
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
@@ -938,10 +1025,10 @@ fun AppState.AppDialogs() {
 
     if (showSettleDialog) {
         val prevCarry = settlements.firstOrNull()?.nextCarryOver ?: 0.0
-        val entriesSum = entries.sumOf { it.calculatedAmount }
-        val netDue = entriesSum + prevCarry
-        var paidStr by remember(netDue) { mutableStateOf(String.format(Locale.US, "%.2f", netDue)) }
-        var noteStr by remember { mutableStateOf("") }
+        val entriesSum = ElamalUtils.roundMoney(entries.sumOf { it.calculatedAmount })
+        val netDue = ElamalUtils.roundMoney(entriesSum + prevCarry)
+        var paidStr by rememberSaveable(netDue) { mutableStateOf(String.format(Locale.US, "%.2f", netDue)) }
+        var noteStr by rememberSaveable { mutableStateOf("") }
 
         AlertDialog(
             onDismissRequest = { showSettleDialog = false },
@@ -949,7 +1036,12 @@ fun AppState.AppDialogs() {
             shape = RoundedCornerShape(20.dp),
             title = { Text("استلام دفعة وأرشفة السجلات", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Surface(
                         color = primaryCustom.copy(alpha = 0.14f),
                         shape = RoundedCornerShape(12.dp),
@@ -957,7 +1049,9 @@ fun AppState.AppDialogs() {
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text("المجموع الصافي المستحق:", fontSize = 12.sp, color = colorScheme.onSurfaceVariant)
-                            Text(ElamalUtils.formatMoney(netDue), fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = primaryCustom)
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(ElamalUtils.formatMoney(netDue), fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = primaryCustom)
+                            }
                         }
                     }
                     OutlinedTextField(
@@ -998,9 +1092,9 @@ fun AppState.AppDialogs() {
     if (showCustomColorPickerDialog) {
         val initialInt = runCatching { android.graphics.Color.parseColor(appColorHex) }
             .getOrDefault(android.graphics.Color.parseColor("#059669"))
-        var rVal by remember { mutableFloatStateOf(android.graphics.Color.red(initialInt).toFloat()) }
-        var gVal by remember { mutableFloatStateOf(android.graphics.Color.green(initialInt).toFloat()) }
-        var bVal by remember { mutableFloatStateOf(android.graphics.Color.blue(initialInt).toFloat()) }
+        var rVal by rememberSaveable { mutableFloatStateOf(android.graphics.Color.red(initialInt).toFloat()) }
+        var gVal by rememberSaveable { mutableFloatStateOf(android.graphics.Color.green(initialInt).toFloat()) }
+        var bVal by rememberSaveable { mutableFloatStateOf(android.graphics.Color.blue(initialInt).toFloat()) }
         val composedHex = String.format(Locale.US, "#%02X%02X%02X", rVal.toInt(), gVal.toInt(), bVal.toInt())
         val previewColor = Color(rVal.toInt(), gVal.toInt(), bVal.toInt())
 
@@ -1008,7 +1102,7 @@ fun AppState.AppDialogs() {
             onDismissRequest = { showCustomColorPickerDialog = false },
             containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
-            icon = { Icon(Icons.Default.ColorLens, contentDescription = null, tint = previewColor) },
+            icon = { Icon(Icons.Default.ColorLens, contentDescription = "اختيار لون", tint = previewColor) },
             title = { Text("اختيار لون مخصص يدوياً", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1020,7 +1114,9 @@ fun AppState.AppDialogs() {
                             .background(previewColor),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(composedHex, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(composedHex, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                        }
                     }
 
                     Text("الأحمر (R: ${rVal.toInt()})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
@@ -1064,9 +1160,9 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // In-App PIN Setup Dialog (Without System Keyboard!)
+    // In-App PIN Setup Dialog
     if (showPinSetupDialog) {
-        var newPin by remember { mutableStateOf("") }
+        var newPin by rememberSaveable { mutableStateOf("") }
 
         AlertDialog(
             onDismissRequest = { showPinSetupDialog = false },
@@ -1146,7 +1242,7 @@ fun AppState.AppDialogs() {
                                 shape = CircleShape,
                                 contentPadding = PaddingValues(0.dp)
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "مسح رقم", modifier = Modifier.size(18.dp))
                             }
                         }
                     }
@@ -1158,11 +1254,16 @@ fun AppState.AppDialogs() {
                         if (newPin.length >= 4) {
                             val hashed = ElamalSecurity.hashPinPbkdf2(newPin)
                             savedPin = hashed
-                            prefs.edit().putString("security_pin", hashed).apply()
-                            Toast.makeText(context, "تم حفظ وتشفير رمز القفل بنجاح ✓", Toast.LENGTH_SHORT).show()
+                            flagSecureEnabled = true
+                            prefs.edit()
+                                .putString("security_pin", hashed)
+                                .putInt("security_pin_length", newPin.length)
+                                .putBoolean("flag_secure_enabled", true)
+                                .apply()
+                            showNotice("تم حفظ وتشفير رمز القفل بنجاح ✓")
                             showPinSetupDialog = false
                         } else {
-                            Toast.makeText(context, "أدخل 4 أرقام على الأقل", Toast.LENGTH_SHORT).show()
+                            showNotice("أدخل 4 أرقام على الأقل")
                         }
                     },
                     enabled = newPin.length >= 4,
@@ -1174,8 +1275,11 @@ fun AppState.AppDialogs() {
                     if (savedPin.isNotBlank()) {
                         TextButton(onClick = {
                             savedPin = ""
-                            prefs.edit().putString("security_pin", "").apply()
-                            Toast.makeText(context, "تم إلغاء قفل التطبيق ✓", Toast.LENGTH_SHORT).show()
+                            prefs.edit()
+                                .putString("security_pin", "")
+                                .putInt("security_pin_length", 0)
+                                .apply()
+                            showNotice("تم إلغاء قفل التطبيق ✓")
                             showPinSetupDialog = false
                         }) {
                             Text("إلغاء القفل", color = Color(0xFFEF4444))
