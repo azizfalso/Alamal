@@ -9,12 +9,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nanomks.elamal.util.ElamalUtils
@@ -37,13 +40,15 @@ fun AppState.SettlementsTab() {
         Column(modifier = Modifier.padding(18.dp)) {
             Text("الرصيد الجاهز للاستلام والأرشفة", fontSize = 13.sp, color = colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(4.dp))
-            Text(ElamalUtils.formatMoney(netDue), fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = primaryCustom)
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Text(ElamalUtils.formatMoney(netDue), fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = primaryCustom)
+            }
             Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = { showSettleDialog = true },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp),
+                    .heightIn(min = 48.dp),
                 shape = RoundedCornerShape(14.dp)
             ) {
                 Icon(Icons.Default.Payments, contentDescription = null)
@@ -64,7 +69,7 @@ fun AppState.SettlementsTab() {
     }
 
     Spacer(modifier = Modifier.height(14.dp))
-    Text("أرشيف الدفعات السابقة (${settlements.size})", fontWeight = FontWeight.Bold, fontSize = (15 * fontScale).sp)
+    Text("أرشيف الدفعات السابقة (${settlements.size})", fontWeight = FontWeight.Bold, fontSize = 15.sp)
     Spacer(modifier = Modifier.height(8.dp))
 
     if (settlements.isEmpty()) {
@@ -127,6 +132,3 @@ fun AppState.SettlementsTab() {
         }
     }
 }
-
-
-
