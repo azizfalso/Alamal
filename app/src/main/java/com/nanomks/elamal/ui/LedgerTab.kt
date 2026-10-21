@@ -20,11 +20,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nanomks.elamal.R
 import com.nanomks.elamal.data.EntryType
 import com.nanomks.elamal.util.ElamalUtils
 
@@ -123,7 +125,7 @@ fun AppState.LedgerTab() {
                             )
                         }
                         Text(
-                            text = if (activeClockIn > 0L) "جلسة جارية (بدأت ${ElamalUtils.formatTime(activeClockIn)})" else "الصافي المستحق حالياً",
+                            text = if (activeClockIn > 0L) "جلسة جارية (بدأت ${ElamalUtils.formatTime(activeClockIn)})" else stringResource(R.string.net_due_title),
                             color = Color.White.copy(alpha = 0.92f),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -243,6 +245,7 @@ fun AppState.LedgerTab() {
 
     Spacer(modifier = Modifier.height(10.dp))
 
+    // 4 perfectly proportioned action buttons matching height 48.dp & rounded 14.dp
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -253,24 +256,24 @@ fun AppState.LedgerTab() {
                 if (activeClockIn == 0L) startClockIn() else showClockOutDialog = true
             },
             modifier = Modifier
-                .weight(1.45f)
-                .heightIn(min = 48.dp),
+                .weight(1.35f)
+                .height(48.dp),
             shape = RoundedCornerShape(14.dp),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (activeClockIn == 0L) primaryCustom else Color(0xFFDC2626)
             )
         ) {
             Icon(
                 if (activeClockIn == 0L) Icons.Default.PlayArrow else Icons.Default.Stop,
-                contentDescription = if (activeClockIn == 0L) "تسجيل دخول" else "تسجيل خروج",
-                modifier = Modifier.size(18.dp)
+                contentDescription = stringResource(R.string.btn_clock_in),
+                modifier = Modifier.size(17.dp)
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(3.dp))
             Text(
-                text = if (activeClockIn == 0L) "تسجيل دخول" else "خروج (${ElamalUtils.formatDurationArabic(elapsedActiveMin)})",
+                text = if (activeClockIn == 0L) stringResource(R.string.btn_clock_in) else "خروج (${ElamalUtils.formatDurationArabic(elapsedActiveMin)})",
                 fontWeight = FontWeight.Bold,
-                fontSize = 12.5f.sp,
+                fontSize = 11.5f.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -288,19 +291,19 @@ fun AppState.LedgerTab() {
             onClick = { showRemoteDialog = true },
             modifier = Modifier
                 .weight(0.95f)
-                .heightIn(min = 48.dp),
+                .height(48.dp),
             shape = RoundedCornerShape(14.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
             colors = ButtonDefaults.filledTonalButtonColors(
                 containerColor = if (isDark) Color(0xFF1E3A8A).copy(alpha = 0.45f) else Color(0xFFDBEAFE),
                 contentColor = if (isDark) Color(0xFF93C5FD) else Color(0xFF1E40AF)
             )
         ) {
-            Icon(Icons.Default.Computer, contentDescription = "عمل عن بعد", modifier = Modifier.size(15.dp))
-            Spacer(modifier = Modifier.width(4.dp))
+            Icon(Icons.Default.Computer, contentDescription = stringResource(R.string.btn_remote), modifier = Modifier.size(14.dp))
+            Spacer(modifier = Modifier.width(3.dp))
             Text(
-                "عن بعد",
-                fontSize = 12.sp,
+                stringResource(R.string.btn_remote),
+                fontSize = 11.5f.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -311,18 +314,18 @@ fun AppState.LedgerTab() {
             onClick = { showCreditDialog = true },
             modifier = Modifier
                 .weight(0.95f)
-                .heightIn(min = 48.dp),
+                .height(48.dp),
             shape = RoundedCornerShape(14.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
             colors = ButtonDefaults.filledTonalButtonColors(
                 containerColor = if (isDark) Color(0xFF7F1D1D).copy(alpha = 0.45f) else Color(0xFFFEE2E2),
                 contentColor = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B)
             )
         ) {
             Text(
-                "كريدي (-)",
+                stringResource(R.string.btn_credit),
                 fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
+                fontSize = 11.5f.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -457,10 +460,10 @@ fun AppState.LedgerTab() {
     if (filtered.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.EventNote, contentDescription = "الدفتر فارغ", modifier = Modifier.size(56.dp), tint = colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
+                Icon(Icons.Default.EventNote, contentDescription = stringResource(R.string.empty_ledger_title), modifier = Modifier.size(56.dp), tint = colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("لا توجد سجلات عمل مطابقة في الدفتر حالياً", fontWeight = FontWeight.Bold, color = colorScheme.onSurfaceVariant)
-                Text("اضغط على «تسجيل دخول» أو أيقونة الساعات اليدوية للبدء", fontSize = 12.sp, color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                Text(stringResource(R.string.empty_ledger_title), fontWeight = FontWeight.Bold, color = colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.empty_ledger_subtitle), fontSize = 12.sp, color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
             }
         }
     } else {
