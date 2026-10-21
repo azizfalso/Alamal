@@ -1,11 +1,8 @@
 package com.nanomks.elamal.ui
 
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -35,8 +32,9 @@ import com.nanomks.elamal.util.ElamalUtils
 import java.util.*
 
 /**
- * Reusable interactive Date & Time selector card that opens native Android Calendar and Clock pickers.
+ * Pure Material 3 Compose Date & Time selector that respects Dark Mode, Light Mode, and Custom Theme Colors!
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InteractiveDateTimeSelector(
     label: String,
@@ -45,51 +43,139 @@ fun InteractiveDateTimeSelector(
     includeTime: Boolean = true,
     onTimestampChange: (Long) -> Unit
 ) {
-    val context = LocalContext.current
+    var showComposeDatePicker by remember { mutableStateOf(false) }
+    var showComposeTimePicker by remember { mutableStateOf(false) }
+
     val cal = remember(timestampMillis) {
         Calendar.getInstance().apply { timeInMillis = timestampMillis }
     }
 
-    fun openDatePicker() {
+    if (showComposeDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = timestampMillis)
         DatePickerDialog(
-            context,
-            { _, year, month, dayOfMonth ->
-                val updated = Calendar.getInstance().apply {
-                    timeInMillis = timestampMillis
-                    set(Calendar.YEAR, year)
-                    set(Calendar.MONTH, month)
-                    set(Calendar.DAY_OF_MONTH, dayOfMonth)
+            onDismissRequest = { showComposeDatePicker = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { selectedUtc ->
+                            val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                                timeInMillis = selectedUtc
+                            }
+                            val updated = Calendar.getInstance().apply {
+                                timeInMillis = timestampMillis
+                                set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+                                set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+                                set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
+                            }
+                            onTimestampChange(updated.timeInMillis)
+                        }
+                        showComposeDatePicker = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("تأكيد التاريخ", color = Color.White, fontWeight = FontWeight.Bold)
                 }
-                onTimestampChange(updated.timeInMillis)
             },
-            cal.get(Calendar.YEAR),
-            cal.get(Calendar.MONTH),
-            cal.get(Calendar.DAY_OF_MONTH)
-        ).show()
+            dismissButton = {
+                TextButton(onClick = { showComposeDatePicker = false }) {
+                    Text("إلغاء")
+                }
+            },
+            colors = DatePickerDefaults.colors(
+                containerColor = MaterialTheme.colorScheme.surface
+            )
+        ) {
+            DatePicker(
+                state = datePickerState,
+                colors = DatePickerDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    headlineContentColor = accentColor,
+                    weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    dayContentColor = MaterialTheme.colorScheme.onSurface,
+                    selectedDayContainerColor = accentColor,
+                    selectedDayContentColor = Color.White,
+                    todayContentColor = accentColor,
+                    todayDateBorderColor = accentColor
+                )
+            )
+        }
     }
 
-    fun openTimePicker() {
-        TimePickerDialog(
-            context,
-            { _, hourOfDay, minute ->
-                val updated = Calendar.getInstance().apply {
-                    timeInMillis = timestampMillis
-                    set(Calendar.HOUR_OF_DAY, hourOfDay)
-                    set(Calendar.MINUTE, minute)
-                    set(Calendar.SECOND, 0)
+    if (showComposeTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = cal.get(Calendar.HOUR_OF_DAY),
+            initialMinute = cal.get(Calendar.MINUTE),
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { showComposeTimePicker = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            shape = RoundedCornerShape(22.dp),
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Schedule, contentDescription = null, tint = accentColor)
+                    Text("اختر الوقت (24 ساعة)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
-                onTimestampChange(updated.timeInMillis)
             },
-            cal.get(Calendar.HOUR_OF_DAY),
-            cal.get(Calendar.MINUTE),
-            true
-        ).show()
+            text = {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        TimePicker(
+                            state = timePickerState,
+                            colors = TimePickerDefaults.colors(
+                                clockDialColor = MaterialTheme.colorScheme.surfaceVariant,
+                                clockDialSelectedContentColor = Color.White,
+                                clockDialUnselectedContentColor = MaterialTheme.colorScheme.onSurface,
+                                selectorColor = accentColor,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                timeSelectorSelectedContainerColor = accentColor.copy(alpha = 0.2f),
+                                timeSelectorUnselectedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                timeSelectorSelectedContentColor = accentColor,
+                                timeSelectorUnselectedContentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val updated = Calendar.getInstance().apply {
+                            timeInMillis = timestampMillis
+                            set(Calendar.HOUR_OF_DAY, timePickerState.hour)
+                            set(Calendar.MINUTE, timePickerState.minute)
+                            set(Calendar.SECOND, 0)
+                        }
+                        onTimestampChange(updated.timeInMillis)
+                        showComposeTimePicker = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("تأكيد الوقت", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showComposeTimePicker = false }) {
+                    Text("إلغاء")
+                }
+            }
+        )
     }
 
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.25f)),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.28f)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -107,7 +193,7 @@ fun InteractiveDateTimeSelector(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = accentColor.copy(alpha = 0.12f),
+                        color = accentColor.copy(alpha = 0.16f),
                         modifier = Modifier.clickable {
                             val nowCal = Calendar.getInstance()
                             val updated = Calendar.getInstance().apply {
@@ -124,12 +210,12 @@ fun InteractiveDateTimeSelector(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = accentColor,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f),
                         modifier = Modifier.clickable {
                             val yestCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
                             val updated = Calendar.getInstance().apply {
@@ -146,7 +232,7 @@ fun InteractiveDateTimeSelector(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
                 }
@@ -157,9 +243,14 @@ fun InteractiveDateTimeSelector(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
-                    onClick = { openDatePicker() },
+                    onClick = { showComposeDatePicker = true },
                     modifier = Modifier.weight(1.25f),
                     shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
                 ) {
                     Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp), tint = accentColor)
@@ -174,9 +265,14 @@ fun InteractiveDateTimeSelector(
 
                 if (includeTime) {
                     OutlinedButton(
-                        onClick = { openTimePicker() },
+                        onClick = { showComposeTimePicker = true },
                         modifier = Modifier.weight(0.95f),
                         shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
                     ) {
                         Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp), tint = accentColor)
@@ -198,6 +294,51 @@ fun InteractiveDateTimeSelector(
 fun AppState.AppDialogs() {
     val context = LocalContext.current
 
+    // Edit Active Running Clock-In Start Time Dialog
+    if (showEditActiveClockInDialog && activeClockIn > 0L) {
+        var newActiveStart by remember(activeClockIn) { mutableLongStateOf(activeClockIn) }
+
+        AlertDialog(
+            onDismissRequest = { showEditActiveClockInDialog = false },
+            containerColor = colorScheme.surface,
+            shape = RoundedCornerShape(22.dp),
+            icon = { Icon(Icons.Default.HistoryToggleOff, contentDescription = null, tint = primaryCustom) },
+            title = { Text("تعديل وقت بداية الجلسة الجارية", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "إذا نسيت تسجيل الدخول في بداية دوامك، يمكنك تعديل وقت البداية الفعلي هنا:",
+                        fontSize = 12.sp,
+                        color = colorScheme.onSurfaceVariant
+                    )
+                    InteractiveDateTimeSelector(
+                        label = "وقت البداية الفعلي:",
+                        timestampMillis = newActiveStart,
+                        accentColor = primaryCustom,
+                        includeTime = true,
+                        onTimestampChange = { newActiveStart = it }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newActiveStart > System.currentTimeMillis()) {
+                            Toast.makeText(context, "لا يمكن أن يكون وقت البداية في المستقبل", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        updateActiveClockInStart(newActiveStart)
+                        showEditActiveClockInDialog = false
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("حفظ وتحديث العداد") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditActiveClockInDialog = false }) { Text("إلغاء") }
+            }
+        )
+    }
+
     // Overlap Warning Confirmation Dialog
     if (overlapWarningMessage != null) {
         AlertDialog(
@@ -205,6 +346,7 @@ fun AppState.AppDialogs() {
                 overlapWarningMessage = null
                 pendingForcedAction = null
             },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
             icon = { Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFFD97706)) },
             title = { Text("تنبيه تداخل في الأوقات", fontWeight = FontWeight.Bold) },
@@ -235,6 +377,7 @@ fun AppState.AppDialogs() {
         val targetFile = confirmRestoreFileName!!
         AlertDialog(
             onDismissRequest = { confirmRestoreFileName = null },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
             icon = { Icon(Icons.Default.Restore, contentDescription = null, tint = primaryCustom) },
             title = { Text("تأكيد استعادة النسخة الاحتياطية", fontWeight = FontWeight.Bold) },
@@ -253,13 +396,14 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // Custom Date Range Dialog (Interactive Pickers instead of typing!)
+    // Custom Date Range Dialog
     if (showCustomPeriodPdfDialog) {
         var fromMillis by remember { mutableLongStateOf(customReportStartMillis) }
         var toMillis by remember { mutableLongStateOf(customReportEndMillis) }
 
         AlertDialog(
             onDismissRequest = { showCustomPeriodPdfDialog = false },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
             icon = { Icon(Icons.Default.DateRange, contentDescription = null, tint = primaryCustom) },
             title = { Text("تحديد فترة مخصصة للتقارير", fontWeight = FontWeight.Bold) },
@@ -326,7 +470,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // Add Manual Past Hourly Session Dialog (Interactive Pickers + Live Duration Preview)
+    // Add Manual Past Hourly Session Dialog
     if (showManualHourlyDialog) {
         val now = System.currentTimeMillis()
         var startMillis by remember { mutableLongStateOf(now - 4 * 3600_000L) }
@@ -342,6 +486,7 @@ fun AppState.AppDialogs() {
 
         AlertDialog(
             onDismissRequest = { showManualHourlyDialog = false },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
             icon = { Icon(Icons.Default.MoreTime, contentDescription = null, tint = primaryCustom) },
             title = { Text("إضافة جلسة ساعات يدوية", fontWeight = FontWeight.Bold) },
@@ -371,7 +516,6 @@ fun AppState.AppDialogs() {
                         onTimestampChange = { endMillis = it }
                     )
 
-                    // Quick duration presets
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -386,9 +530,8 @@ fun AppState.AppDialogs() {
                         }
                     }
 
-                    // Live calculation preview banner
                     Surface(
-                        color = if (endMillis > startMillis) primaryCustom.copy(alpha = 0.12f) else Color(0xFFEF4444).copy(alpha = 0.12f),
+                        color = if (endMillis > startMillis) primaryCustom.copy(alpha = 0.14f) else Color(0xFFEF4444).copy(alpha = 0.14f),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -452,7 +595,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // Edit Existing Entry Dialog (With Interactive Pickers for all types!)
+    // Edit Existing Entry Dialog
     if (editingEntry != null) {
         val target = editingEntry!!
         var startMillis by remember(target.id) { mutableLongStateOf(target.startTime) }
@@ -463,6 +606,7 @@ fun AppState.AppDialogs() {
 
         AlertDialog(
             onDismissRequest = { editingEntry = null },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
             icon = { Icon(Icons.Default.Edit, contentDescription = null, tint = primaryCustom) },
             title = { Text("تعديل السجل وتفاصيل الوقت", fontWeight = FontWeight.Bold) },
@@ -542,6 +686,7 @@ fun AppState.AppDialogs() {
     if (confirmIgnoreAllWifi) {
         AlertDialog(
             onDismissRequest = { confirmIgnoreAllWifi = false },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
             title = { Text("تأكيد تجاهل الكل", fontWeight = FontWeight.Bold) },
             text = { Text("هل أنت متأكد من تجاهل جميع فترات الواي فاي المقترحة؟") },
@@ -566,6 +711,7 @@ fun AppState.AppDialogs() {
 
         AlertDialog(
             onDismissRequest = { editingSettlement = null },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
             title = { Text("تعديل دفعة قديمة (مع تحديث المرحّل)", fontWeight = FontWeight.Bold) },
             text = {
@@ -618,12 +764,13 @@ fun AppState.AppDialogs() {
 
         AlertDialog(
             onDismissRequest = { showClockOutDialog = false },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
             title = { Text("تسجيل الخروج وإنهاء الجلسة", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Surface(
-                        color = primaryCustom.copy(alpha = 0.12f),
+                        color = primaryCustom.copy(alpha = 0.14f),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -669,7 +816,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // Remote Work Dialog (Now with Date & Time Picker!)
+    // Remote Work Dialog
     if (showRemoteDialog) {
         var amountStr by remember { mutableStateOf("") }
         var noteStr by remember { mutableStateOf("") }
@@ -677,6 +824,7 @@ fun AppState.AppDialogs() {
 
         AlertDialog(
             onDismissRequest = { showRemoteDialog = false },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
             icon = { Icon(Icons.Default.Computer, contentDescription = null, tint = Color(0xFF2563EB)) },
             title = { Text("إضافة عمل عن بعد (أجرة ثابتة)", fontWeight = FontWeight.Bold) },
@@ -728,7 +876,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // Credit / Advance Dialog (Now with Date & Time Picker!)
+    // Credit / Advance Dialog
     if (showCreditDialog) {
         var creditStr by remember { mutableStateOf("") }
         var noteStr by remember { mutableStateOf("") }
@@ -736,6 +884,7 @@ fun AppState.AppDialogs() {
 
         AlertDialog(
             onDismissRequest = { showCreditDialog = false },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
             icon = { Icon(Icons.Default.RemoveCircleOutline, contentDescription = null, tint = Color(0xFFDC2626)) },
             title = { Text("إضافة كريدي / سلفة (يُخصم من الصافي)", fontWeight = FontWeight.Bold) },
@@ -796,12 +945,13 @@ fun AppState.AppDialogs() {
 
         AlertDialog(
             onDismissRequest = { showSettleDialog = false },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(20.dp),
             title = { Text("استلام دفعة وأرشفة السجلات", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Surface(
-                        color = primaryCustom.copy(alpha = 0.12f),
+                        color = primaryCustom.copy(alpha = 0.14f),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -856,6 +1006,7 @@ fun AppState.AppDialogs() {
 
         AlertDialog(
             onDismissRequest = { showCustomColorPickerDialog = false },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
             icon = { Icon(Icons.Default.ColorLens, contentDescription = null, tint = previewColor) },
             title = { Text("اختيار لون مخصص يدوياً", fontWeight = FontWeight.Bold) },
@@ -919,6 +1070,7 @@ fun AppState.AppDialogs() {
 
         AlertDialog(
             onDismissRequest = { showPinSetupDialog = false },
+            containerColor = colorScheme.surface,
             shape = RoundedCornerShape(22.dp),
             title = {
                 Text(
@@ -934,7 +1086,7 @@ fun AppState.AppDialogs() {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Surface(
-                        color = primaryCustom.copy(alpha = 0.1f),
+                        color = primaryCustom.copy(alpha = 0.12f),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
