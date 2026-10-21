@@ -9,16 +9,19 @@ import java.math.RoundingMode
 
 @Dao
 interface ElamalDao {
-    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 AND settlementId IS NULL ORDER BY id DESC, COALESCE(endTime, startTime) DESC")
+    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 AND settlementId IS NULL ORDER BY startTime DESC, id DESC")
     fun getActiveEntries(): Flow<List<WorkEntry>>
 
-    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 ORDER BY id DESC, COALESCE(endTime, startTime) DESC")
+    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 ORDER BY startTime DESC, id DESC")
     fun getAllNonDeletedEntriesFlow(): Flow<List<WorkEntry>>
 
-    @Query("SELECT * FROM work_entries WHERE isDeleted = 1 ORDER BY id DESC")
+    /**
+     * Ordered by deletedAt DESC, id DESC so Undo always restores the most recently deleted item (#44).
+     */
+    @Query("SELECT * FROM work_entries WHERE isDeleted = 1 ORDER BY COALESCE(deletedAt, startTime) DESC, id DESC")
     fun getDeletedEntriesFlow(): Flow<List<WorkEntry>>
 
-    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 ORDER BY id DESC, COALESCE(endTime, startTime) DESC")
+    @Query("SELECT * FROM work_entries WHERE isDeleted = 0 ORDER BY startTime DESC, id DESC")
     suspend fun getAllEntriesSync(): List<WorkEntry>
 
     @Query("SELECT * FROM work_entries WHERE isDeleted = 0 AND type = 'HOURLY' AND endTime IS NOT NULL AND id != :excludeId AND startTime < :endMillis AND endTime > :startMillis")
@@ -54,10 +57,13 @@ interface ElamalDao {
     @Update
     suspend fun updateEntry(entry: WorkEntry)
 
+    @Delete
+    suspend fun deleteEntryPermanently(entry: WorkEntry)
+
     @Query("DELETE FROM work_entries")
     suspend fun clearEntries()
 
-    @Query("DELETE FROM work_entries WHERE isDeleted = 1 AND startTime < :olderThanMillis")
+    @Query("DELETE FROM work_entries WHERE isDeleted = 1 AND COALESCE(deletedAt, startTime) < :olderThanMillis")
     suspend fun purgeOldSoftDeletedEntries(olderThanMillis: Long)
 
     @Query("DELETE FROM work_entries WHERE isDeleted = 1")
@@ -93,13 +99,6 @@ interface ElamalDao {
     @Query("UPDATE wifi_sessions SET status = 'IGNORED' WHERE status = 'PENDING'")
     suspend fun ignoreAllPendingWifi()
 
-    /**
-     * Fixed cascade calculation:
-     * Uses dynamic sum of active non-deleted entries attached to the settlement.
-     * If all attached entries were deleted (totalAttachedCount > 0 and active sum == 0.0),
-     * effectiveEntriesTotal accurately becomes 0.0 instead of keeping stale s.entriesTotal!
-     * Only falls back to s.entriesTotal if the settlement never had individual entries linked (legacy).
-     */
     @Transaction
     suspend fun recalculateSettlementsCascade() {
         val list = getSettlementsAsc()
@@ -161,7 +160,7 @@ interface ElamalDao {
     }
 }
 
-@Database(entities = [WorkEntry::class, Settlement::class, WifiSession::class], version = 5, exportSchema = false)
+@Database(entities = [WorkEntry::class, Settlement::class, WifiSession::class], version = 6, exportSchema = false)
 abstract class ElamalDatabase : RoomDatabase() {
     abstract fun dao(): ElamalDao
 
@@ -169,29 +168,35 @@ abstract class ElamalDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: ElamalDatabase? = null
 
-        private val SAFE_MIGRATION_1_5 = object : Migration(1, 5) {
-            override fun migrate(db: SupportSQLiteDatabase) {
+        /**
+         * Safely inspects existing table columns via PRAGMA and adds any missing columns (#47).
+         * Protects users upgrading from any older schema (v1..v5) without data loss or crashes.
+         */
+        private fun ensureSafeWorkEntriesSchema(db: SupportSQLiteDatabase) {
+            val existingColumns = mutableSetOf<String>()
+            db.query("PRAGMA table_info(`work_entries`)").use { cursor ->
+                val nameIdx = cursor.getColumnIndex("name")
+                while (cursor.moveToNext()) {
+                    if (nameIdx >= 0) {
+                        existingColumns.add(cursor.getString(nameIdx))
+                    }
+                }
+            }
+            if ("isDeleted" !in existingColumns) {
+                db.execSQL("ALTER TABLE work_entries ADD COLUMN isDeleted INTEGER NOT NULL DEFAULT 0")
+            }
+            if ("eventUuid" !in existingColumns) {
                 db.execSQL("ALTER TABLE work_entries ADD COLUMN eventUuid TEXT")
-                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_work_entries_eventUuid ON work_entries(eventUuid)")
             }
+            if ("deletedAt" !in existingColumns) {
+                db.execSQL("ALTER TABLE work_entries ADD COLUMN deletedAt INTEGER")
+            }
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_work_entries_eventUuid ON work_entries(eventUuid)")
         }
 
-        private val SAFE_MIGRATION_2_5 = object : Migration(2, 5) {
+        private fun createSafeMigration(startVersion: Int, endVersion: Int) = object : Migration(startVersion, endVersion) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE work_entries ADD COLUMN eventUuid TEXT")
-                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_work_entries_eventUuid ON work_entries(eventUuid)")
-            }
-        }
-
-        private val SAFE_MIGRATION_3_5 = object : Migration(3, 5) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_work_entries_eventUuid ON work_entries(eventUuid)")
-            }
-        }
-
-        private val MIGRATION_4_5 = object : Migration(4, 5) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                // Schema between v4 and v5 is identical
+                ensureSafeWorkEntriesSchema(db)
             }
         }
 
@@ -203,10 +208,11 @@ abstract class ElamalDatabase : RoomDatabase() {
                     "elamal_db"
                 )
                     .addMigrations(
-                        SAFE_MIGRATION_1_5,
-                        SAFE_MIGRATION_2_5,
-                        SAFE_MIGRATION_3_5,
-                        MIGRATION_4_5
+                        createSafeMigration(1, 6),
+                        createSafeMigration(2, 6),
+                        createSafeMigration(3, 6),
+                        createSafeMigration(4, 6),
+                        createSafeMigration(5, 6)
                     )
                     .build()
                     .also { INSTANCE = it }
