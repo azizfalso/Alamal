@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.nanomks.elamal.R
 import com.nanomks.elamal.util.ElamalUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -55,6 +57,8 @@ fun AppState.RootContent(activity: FragmentActivity) {
     sysDark = isSystemInDarkTheme()
     primaryCustom = runCatching { Color(android.graphics.Color.parseColor(appColorHex)) }.getOrDefault(Color(0xFF059669))
 
+    // Harmonized ColorScheme: explicitly overrides secondaryContainer & primaryContainer
+    // so NavigationBar pills and FilledTonalIconButtons match the app's theme instead of default purple!
     colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -62,7 +66,12 @@ fun AppState.RootContent(activity: FragmentActivity) {
         isDark -> darkColorScheme(
             primary = primaryCustom,
             onPrimary = Color.White,
-            secondary = primaryCustom.copy(alpha = 0.85f),
+            primaryContainer = primaryCustom.copy(alpha = 0.22f),
+            onPrimaryContainer = Color(0xFFF8FAFC),
+            secondary = primaryCustom,
+            onSecondary = Color.White,
+            secondaryContainer = primaryCustom.copy(alpha = 0.20f),
+            onSecondaryContainer = Color(0xFFF8FAFC),
             background = Color(0xFF090E1A),
             surface = Color(0xFF151F32),
             surfaceVariant = Color(0xFF1E293B),
@@ -73,7 +82,12 @@ fun AppState.RootContent(activity: FragmentActivity) {
         else -> lightColorScheme(
             primary = primaryCustom,
             onPrimary = Color.White,
-            secondary = primaryCustom.copy(alpha = 0.85f),
+            primaryContainer = primaryCustom.copy(alpha = 0.14f),
+            onPrimaryContainer = primaryCustom,
+            secondary = primaryCustom,
+            onSecondary = Color.White,
+            secondaryContainer = primaryCustom.copy(alpha = 0.14f),
+            onSecondaryContainer = primaryCustom,
             background = Color(0xFFF1F5F9),
             surface = Color(0xFFFFFFFF),
             surfaceVariant = Color(0xFFE2E8F0),
@@ -83,7 +97,6 @@ fun AppState.RootContent(activity: FragmentActivity) {
         )
     }
 
-    // Back navigation handler (#21): return to Ledger tab first before closing app
     BackHandler(enabled = isUnlocked && currentTab != 0) {
         currentTab = 0
     }
@@ -110,7 +123,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
         }
     }
 
-    // One-time startup sync: only purge soft-deleted entries older than 7 days (#1)
+    // One-time startup sync: purge soft-deleted entries older than 7 days (#42)
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             ElamalUtils.processPendingWidgetEventsOnAppOpen(context, dao)
@@ -127,7 +140,6 @@ fun AppState.RootContent(activity: FragmentActivity) {
         }
     }
 
-    // Battery-friendly UI minute ticker
     LaunchedEffect(lifecycleOwner, activeClockIn) {
         if (activeClockIn <= 0L) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -136,6 +148,12 @@ fun AppState.RootContent(activity: FragmentActivity) {
                 delay(30_000L)
             }
         }
+    }
+
+    // Only show quick Undo button in TopAppBar if a deletion happened within the last 15 minutes (#43).
+    // Older deleted records remain safely accessible via the Trash icon or Settings!
+    val hasRecentSoftDelete = remember(deletedEntries, lastSoftDeleteMillis, nowMillis) {
+        deletedEntries.isNotEmpty() && (System.currentTimeMillis() - lastSoftDeleteMillis <= 15 * 60_000L)
     }
 
     CompositionLocalProvider(
@@ -207,13 +225,13 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text("العمل", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                                        Text(stringResource(R.string.app_name), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
                                         Surface(
                                             color = primaryCustom.copy(alpha = 0.14f),
                                             shape = RoundedCornerShape(6.dp)
                                         ) {
                                             Text(
-                                                text = "v4.5",
+                                                text = "v4.6",
                                                 fontSize = 10.sp,
                                                 color = primaryCustom,
                                                 fontWeight = FontWeight.Bold,
@@ -233,15 +251,33 @@ fun AppState.RootContent(activity: FragmentActivity) {
                             }
                         },
                         actions = {
-                            if (deletedEntries.isNotEmpty()) {
+                            if (hasRecentSoftDelete) {
                                 FilledTonalButton(
                                     onClick = { undoLastDelete() },
-                                    modifier = Modifier.padding(end = 8.dp),
-                                    shape = RoundedCornerShape(10.dp)
+                                    modifier = Modifier.padding(end = 4.dp),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                 ) {
-                                    Icon(Icons.Default.Undo, contentDescription = "تراجع عن الحذف", modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Undo, contentDescription = "تراجع عن آخر حذف", modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("تراجع (${deletedEntries.size})", fontSize = 12.sp)
+                                    Text("تراجع", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            if (deletedEntries.isNotEmpty()) {
+                                IconButton(onClick = { showTrashBinDialog = true }) {
+                                    BadgedBox(
+                                        badge = {
+                                            Badge(containerColor = Color(0xFFEF4444), contentColor = Color.White) {
+                                                Text(ElamalUtils.localizeDigits("${deletedEntries.size}"))
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            Icons.Default.DeleteSweep,
+                                            contentDescription = stringResource(R.string.trash_bin_title),
+                                            tint = colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -252,23 +288,31 @@ fun AppState.RootContent(activity: FragmentActivity) {
                         containerColor = colorScheme.surface,
                         tonalElevation = 10.dp
                     ) {
+                        val navItemColors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = primaryCustom,
+                            selectedTextColor = primaryCustom,
+                            indicatorColor = primaryCustom.copy(alpha = 0.15f),
+                            unselectedIconColor = colorScheme.onSurfaceVariant,
+                            unselectedTextColor = colorScheme.onSurfaceVariant
+                        )
                         NavigationBarItem(
                             selected = currentTab == 0,
                             onClick = { currentTab = 0 },
+                            colors = navItemColors,
                             icon = {
                                 BadgedBox(
                                     badge = {
                                         if (pendingWifiList.isNotEmpty()) {
-                                            Badge { Text("${pendingWifiList.size}") }
+                                            Badge { Text(ElamalUtils.localizeDigits("${pendingWifiList.size}")) }
                                         }
                                     }
                                 ) {
-                                    Icon(Icons.Default.AccessTime, contentDescription = "تبويب الدفتر")
+                                    Icon(Icons.Default.AccessTime, contentDescription = stringResource(R.string.tab_ledger))
                                 }
                             },
                             label = {
                                 Text(
-                                    "الدفتر",
+                                    stringResource(R.string.tab_ledger),
                                     fontWeight = if (currentTab == 0) FontWeight.ExtraBold else FontWeight.Normal
                                 )
                             }
@@ -276,10 +320,11 @@ fun AppState.RootContent(activity: FragmentActivity) {
                         NavigationBarItem(
                             selected = currentTab == 1,
                             onClick = { currentTab = 1 },
-                            icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = "تبويب الدفعات") },
+                            colors = navItemColors,
+                            icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = stringResource(R.string.tab_settlements)) },
                             label = {
                                 Text(
-                                    "الدفعات",
+                                    stringResource(R.string.tab_settlements),
                                     fontWeight = if (currentTab == 1) FontWeight.ExtraBold else FontWeight.Normal
                                 )
                             }
@@ -287,10 +332,11 @@ fun AppState.RootContent(activity: FragmentActivity) {
                         NavigationBarItem(
                             selected = currentTab == 2,
                             onClick = { currentTab = 2 },
-                            icon = { Icon(Icons.Default.Assessment, contentDescription = "تبويب التقارير") },
+                            colors = navItemColors,
+                            icon = { Icon(Icons.Default.Assessment, contentDescription = stringResource(R.string.tab_reports)) },
                             label = {
                                 Text(
-                                    "التقارير",
+                                    stringResource(R.string.tab_reports),
                                     fontWeight = if (currentTab == 2) FontWeight.ExtraBold else FontWeight.Normal
                                 )
                             }
@@ -298,10 +344,11 @@ fun AppState.RootContent(activity: FragmentActivity) {
                         NavigationBarItem(
                             selected = currentTab == 3,
                             onClick = { currentTab = 3 },
-                            icon = { Icon(Icons.Default.Settings, contentDescription = "تبويب الإعدادات") },
+                            colors = navItemColors,
+                            icon = { Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.tab_settings)) },
                             label = {
                                 Text(
-                                    "الإعدادات",
+                                    stringResource(R.string.tab_settings),
                                     fontWeight = if (currentTab == 3) FontWeight.ExtraBold else FontWeight.Normal
                                 )
                             }
