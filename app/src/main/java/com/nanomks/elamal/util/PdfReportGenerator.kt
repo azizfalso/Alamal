@@ -41,7 +41,8 @@ object PdfReportGenerator {
         reportTitle: String,
         entries: List<WorkEntry>,
         settlements: List<Settlement>,
-        isDarkMode: Boolean
+        isDarkMode: Boolean,
+        carryOver: Double = 0.0
     ) {
         try {
             cleanupCachedReports(context, maxAgeMillis = 5 * 60_000L)
@@ -69,9 +70,9 @@ object PdfReportGenerator {
             var totalHourlyMinutes = 0L
             var totalRemote = 0.0
             var totalCredit = 0.0
-            var netTotal = 0.0
+            var entriesNetTotal = 0.0
             for (e in entries) {
-                netTotal += e.calculatedAmount
+                entriesNetTotal += e.calculatedAmount
                 when (e.type) {
                     EntryType.HOURLY -> {
                         if (e.endTime != null) {
@@ -82,6 +83,10 @@ object PdfReportGenerator {
                     EntryType.CREDIT -> totalCredit += e.calculatedAmount
                 }
             }
+
+            entriesNetTotal = ElamalUtils.roundMoney(entriesNetTotal)
+            val roundedCarry = ElamalUtils.roundMoney(carryOver)
+            val finalNetTotal = ElamalUtils.roundMoney(entriesNetTotal + roundedCarry)
 
             val chunks = if (entries.isEmpty()) listOf(emptyList()) else entries.chunked(16)
 
@@ -108,17 +113,26 @@ object PdfReportGenerator {
                 var y = 68f
                 if (pageIndex == 0) {
                     val cardTop = 65f
-                    val cardBottom = 130f
+                    val cardBottom = 135f
                     val cardW = 165f
 
-                    // Card 1: Net Total
+                    // Card 1: Net Total (Includes CarryOver)
                     paint.color = if (isDarkMode) Color.parseColor("#064E3B") else Color.parseColor("#D1FAE5")
                     canvas.drawRoundRect(RectF(pageWidth - 36f - cardW, cardTop, pageWidth - 36f, cardBottom), 10f, 10f, paint)
                     paint.color = if (isDarkMode) Color.parseColor("#34D399") else Color.parseColor("#065F46")
                     paint.textSize = 11f
-                    canvas.drawText("الصافي الإجمالي", pageWidth - 48f, cardTop + 24f, paint)
+                    canvas.drawText("الصافي المستحق", pageWidth - 48f, cardTop + 22f, paint)
                     paint.textSize = 15f
-                    canvas.drawText(ElamalUtils.formatMoney(netTotal), pageWidth - 48f, cardTop + 48f, paint)
+                    canvas.drawText(ElamalUtils.formatMoney(finalNetTotal), pageWidth - 48f, cardTop + 44f, paint)
+                    if (roundedCarry != 0.0) {
+                        paint.textSize = 9.5f
+                        canvas.drawText(
+                            "شامل مرحّل: ${ElamalUtils.formatMoney(roundedCarry)}",
+                            pageWidth - 48f,
+                            cardTop + 61f,
+                            paint
+                        )
+                    }
 
                     // Card 2: Total Hours
                     val c2Right = pageWidth - 36f - cardW - 14f
@@ -140,7 +154,7 @@ object PdfReportGenerator {
                     paint.textSize = 13f
                     canvas.drawText("${String.format(Locale.US, "%.1f", totalCredit)} / +${String.format(Locale.US, "%.1f", totalRemote)}", c3Right - 12f, cardTop + 48f, paint)
 
-                    y = 152f
+                    y = 156f
                 }
 
                 val leftX = 36f
@@ -222,7 +236,6 @@ object PdfReportGenerator {
                     } else "-"
                     canvas.drawText(durStr, col2 - 8f, y + 17f, paint)
 
-                    // Multi-line wrapped note inside cell boundaries (#29)
                     if (cleanNote.isNotEmpty()) {
                         canvas.save()
                         canvas.translate(col4 + 7f, y + 5f)
@@ -238,6 +251,30 @@ object PdfReportGenerator {
                 }
 
                 if (pageIndex == chunks.lastIndex) {
+                    if (roundedCarry != 0.0) {
+                        // Row for Entries Subtotal + CarryOver
+                        paint.style = Paint.Style.FILL
+                        paint.color = headerBg
+                        canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
+                        paint.style = Paint.Style.STROKE
+                        paint.color = gridColor
+                        canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
+
+                        paint.style = Paint.Style.FILL
+                        paint.color = subTextColor
+                        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                        paint.textSize = 10.5f
+                        canvas.drawText(
+                            "صافي السجلات (${ElamalUtils.formatMoney(entriesNetTotal)}) + الرصيد المرحّل",
+                            rightX - 8f,
+                            y + 17f,
+                            paint
+                        )
+                        canvas.drawText(ElamalUtils.formatMoney(roundedCarry), col4 - 8f, y + 17f, paint)
+                        y += baseRowH
+                    }
+
+                    // Final Total Row
                     paint.style = Paint.Style.FILL
                     paint.color = headerBg
                     canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
@@ -249,16 +286,16 @@ object PdfReportGenerator {
                     paint.color = textColor
                     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                     paint.textSize = 11f
-                    canvas.drawText("المجموع النهائي", rightX - 8f, y + 17f, paint)
+                    canvas.drawText("المجموع النهائي المستحق", rightX - 8f, y + 17f, paint)
                     canvas.drawText(ElamalUtils.formatDurationArabic(totalHourlyMinutes), col2 - 8f, y + 17f, paint)
-                    canvas.drawText(ElamalUtils.formatMoney(netTotal), col4 - 8f, y + 17f, paint)
+                    canvas.drawText(ElamalUtils.formatMoney(finalNetTotal), col4 - 8f, y + 17f, paint)
                 }
 
                 paint.color = subTextColor
                 paint.textSize = 10f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
                 canvas.drawText(
-                    "تطبيق «العمل» (com.nanomks.elamal v4.5) • نسق التقرير: ${if (isDarkMode) "داكن" else "فاتح للطباعة"} • ${dfDateTime.format(Date())}",
+                    "تطبيق «العمل» (com.nanomks.elamal v4.6) • نسق التقرير: ${if (isDarkMode) "داكن" else "فاتح للطباعة"} • ${dfDateTime.format(Date())}",
                     rightX,
                     pageHeight - 28f,
                     paint
