@@ -51,7 +51,7 @@ fun EntryRowCard(
         EntryType.CREDIT -> Icons.Default.RemoveCircleOutline
     }
 
-    val dateStr = ElamalUtils.formatDate(item.startTime)
+    val dayAndDateStr = ElamalUtils.formatDayAndDate(item.startTime)
     val startClock = ElamalUtils.formatTime(item.startTime)
     val endClock = item.endTime?.let { ElamalUtils.formatTime(it) }
 
@@ -71,7 +71,7 @@ fun EntryRowCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // 1. Right Icon Box (Consistent 42.dp squircle)
+            // 1. Right Icon Box
             Box(
                 modifier = Modifier
                     .size(42.dp)
@@ -87,7 +87,7 @@ fun EntryRowCard(
                 )
             }
 
-            // 2. Center Details Column (Proper RTL alignment, single-line dates, no collision with amount)
+            // 2. Center Details Column
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -140,15 +140,15 @@ fun EntryRowCard(
                     }
                 }
 
-                // Middle Row: Clean Date & Time Pills (Never wraps onto 2 lines or collides with amount)
+                // Middle Row: Day + Date & Time Pills
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = ElamalUtils.ltrIsolate(dateStr),
+                        text = dayAndDateStr,
                         fontSize = 11.5f.sp,
-                        fontWeight = FontWeight.Medium,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
                     )
@@ -174,7 +174,7 @@ fun EntryRowCard(
                     }
                 }
 
-                // Bottom Row: Note (if present) with proper RTL start alignment
+                // Bottom Row: Note
                 if (item.note.isNotBlank()) {
                     Text(
                         text = item.note,
