@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.core.app.NotificationCompat
 import com.nanomks.elamal.MainActivity
 import com.nanomks.elamal.data.ElamalDao
@@ -60,14 +62,12 @@ object ElamalUtils {
         val pm = context.packageManager
         val targetComp = ComponentName(context, targetAliasName)
         if (pm.getComponentEnabledSetting(targetComp) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
-            // Check if others are already disabled
             val anyOtherEnabled = LAUNCHER_ALIASES.any { (name, _) ->
                 name != targetAliasName && pm.getComponentEnabledSetting(ComponentName(context, name)) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
             }
             if (!anyOtherEnabled) return
         }
 
-        // Enable target first, then disable others
         runCatching {
             pm.setComponentEnabledSetting(
                 targetComp,
@@ -132,18 +132,36 @@ object ElamalUtils {
         return if (d != null && pos.index == trimmed.length) d.time else null
     }
 
-    fun getConnectedSsidViaRoot(): String? {
+    /**
+     * Zero-cost pre-check: checks if the device currently has an active Wi-Fi transport
+     * without spawning any root shell process.
+     */
+    fun isWifiConnectedFast(context: Context): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val activeNet = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(activeNet) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    /**
+     * Lightweight Root Wi-Fi SSID reader:
+     * Uses fast `cmd wifi status` and `iw dev wlan0 link` first.
+     * Avoids heavy `dumpsys wifi` unless needed.
+     */
+    fun getConnectedSsidViaRoot(context: Context? = null): String? {
+        if (context != null && !isWifiConnectedFast(context)) {
+            return null
+        }
         var process: Process? = null
         return try {
             process = Runtime.getRuntime().exec("su")
             val os = DataOutputStream(process.outputStream)
             os.writeBytes("cmd wifi status\n")
-            os.writeBytes("dumpsys wifi | grep -E 'mWifiInfo|SSID'\n")
             os.writeBytes("iw dev wlan0 link | grep SSID\n")
             os.writeBytes("exit\n")
             os.flush()
 
-            val finished = process.waitFor(4, TimeUnit.SECONDS)
+            val finished = process.waitFor(3, TimeUnit.SECONDS)
             if (!finished) {
                 process.destroyForcibly()
                 return null
@@ -180,7 +198,7 @@ object ElamalUtils {
             .filter { it.isNotEmpty() }
             .take(6)
 
-        val currentSsid = getConnectedSsidViaRoot()
+        val currentSsid = getConnectedSsidViaRoot(context)
         if (configuredList.isEmpty()) return currentSsid
 
         val now = System.currentTimeMillis()
