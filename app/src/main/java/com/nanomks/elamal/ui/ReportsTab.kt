@@ -245,7 +245,14 @@ fun AppState.ReportsTab() {
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            onClick = { exportPdfReportAsync(scopeTitle, scopedEntries, settlements) },
+                            onClick = {
+                                val carry = when (selectedReportScope) {
+                                    0 -> lastCarryOver
+                                    3 -> settlements.firstOrNull()?.previousCarryOver ?: 0.0
+                                    else -> 0.0
+                                }
+                                exportPdfReportAsync(scopeTitle, scopedEntries, settlements, carry)
+                            },
                             modifier = Modifier
                                 .weight(1.1f)
                                 .height(44.dp),
