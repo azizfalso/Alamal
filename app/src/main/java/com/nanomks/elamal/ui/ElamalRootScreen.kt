@@ -25,11 +25,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nanomks.elamal.util.ElamalUtils
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +51,7 @@ fun ElamalRootScreen(activity: FragmentActivity) {
 fun AppState.RootContent(activity: FragmentActivity) {
     val context = LocalContext.current
     val baseDensity = LocalDensity.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     sysDark = isSystemInDarkTheme()
     primaryCustom = runCatching { Color(android.graphics.Color.parseColor(appColorHex)) }.getOrDefault(Color(0xFF059669))
 
@@ -71,15 +76,21 @@ fun AppState.RootContent(activity: FragmentActivity) {
             secondary = primaryCustom.copy(alpha = 0.85f),
             background = Color(0xFFF1F5F9),
             surface = Color(0xFFFFFFFF),
-            surfaceVariant = Color(0xFFF8FAFC),
+            surfaceVariant = Color(0xFFE2E8F0),
             onBackground = Color(0xFF0F172A),
             onSurface = Color(0xFF0F172A),
             onSurfaceVariant = Color(0xFF475569)
         )
     }
 
-    LaunchedEffect(isDark, primaryCustom) {
-        activity.window.statusBarColor = if (isDark) Color(0xFF090E1A).toArgb() else primaryCustom.toArgb()
+    // Sync both Status Bar and Navigation Bar with Dark/Light Mode
+    LaunchedEffect(isDark, primaryCustom, colorScheme.surface) {
+        val window = activity.window
+        window.statusBarColor = if (isDark) Color(0xFF090E1A).toArgb() else primaryCustom.toArgb()
+        window.navigationBarColor = colorScheme.surface.toArgb()
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = false
+        controller.isAppearanceLightNavigationBars = !isDark
     }
 
     folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -95,7 +106,43 @@ fun AppState.RootContent(activity: FragmentActivity) {
         }
     }
 
-    // Global Font Scale Provider: ensures every Text(sp) across all screens and dialogs scales uniformly!
+    val activeEntriesState by dao.getActiveEntries().collectAsState(initial = emptyList())
+    val allEntriesState by dao.getAllNonDeletedEntriesFlow().collectAsState(initial = emptyList())
+    val settlementsState by dao.getAllSettlements().collectAsState(initial = emptyList())
+    val wifiSessionsState by dao.getVisibleWifiSessions().collectAsState(initial = emptyList())
+
+    LaunchedEffect(activeEntriesState) { entries = activeEntriesState }
+    LaunchedEffect(allEntriesState) { allEntries = allEntriesState }
+    LaunchedEffect(settlementsState) { settlements = settlementsState }
+    LaunchedEffect(wifiSessionsState) { wifiSessions = wifiSessionsState }
+
+    // One-time startup sync (Widget queue + soft-delete cleanup + ongoing notification check)
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            ElamalUtils.processPendingWidgetEventsOnAppOpen(context, dao)
+            dao.purgeSoftDeletedEntries()
+            if (rootWifiEnabled && workSsids.isNotBlank() && ElamalUtils.isWifiConnectedFast(context)) {
+                detectedRootSsid = ElamalUtils.pollAndMergeRootWifi(context, dao)
+            }
+        }
+        val currentClockIn = prefs.getLong("active_clock_in", 0L)
+        activeClockIn = currentClockIn
+        if (currentClockIn > 0L) {
+            ElamalUtils.showOrUpdateOngoingWorkNotification(context, currentClockIn, hourlyRate)
+        }
+    }
+
+    // Battery-friendly UI minute ticker: ONLY ticks when screen is RESUMED in foreground AND a session is active!
+    LaunchedEffect(lifecycleOwner, activeClockIn) {
+        if (activeClockIn <= 0L) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (activeClockIn > 0L) {
+                nowMillis = System.currentTimeMillis()
+                delay(30_000L)
+            }
+        }
+    }
+
     CompositionLocalProvider(
         LocalDensity provides Density(
             density = baseDensity.density,
@@ -112,34 +159,6 @@ fun AppState.RootContent(activity: FragmentActivity) {
                 OnboardingDialog()
             }
 
-            entries = dao.getActiveEntries().collectAsState(initial = emptyList()).value
-            allEntries = dao.getAllNonDeletedEntriesFlow().collectAsState(initial = emptyList()).value
-            settlements = dao.getAllSettlements().collectAsState(initial = emptyList()).value
-            wifiSessions = dao.getVisibleWifiSessions().collectAsState(initial = emptyList()).value
-
-            // Minute Ticker + Auto Widget Queue Sync
-            LaunchedEffect(Unit) {
-                withContext(Dispatchers.IO) {
-                    ElamalUtils.processPendingWidgetEventsOnAppOpen(context, dao)
-                    dao.purgeSoftDeletedEntries()
-                }
-                while (true) {
-                    nowMillis = System.currentTimeMillis()
-                    activeClockIn = prefs.getLong("active_clock_in", 0L)
-                    if (activeClockIn > 0L) {
-                        ElamalUtils.showOrUpdateOngoingWorkNotification(context, activeClockIn, hourlyRate)
-                    } else {
-                        ElamalUtils.cancelOngoingWorkNotification(context)
-                    }
-                    if (rootWifiEnabled && workSsids.isNotBlank()) {
-                        withContext(Dispatchers.IO) {
-                            detectedRootSsid = ElamalUtils.pollAndMergeRootWifi(context, dao)
-                        }
-                    }
-                    delay(60_000L)
-                }
-            }
-
             Scaffold(
                 containerColor = colorScheme.background,
                 topBar = {
@@ -153,22 +172,29 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
+                                // Gradient Phone + DH Emblem in TopAppBar
                                 Box(
                                     modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(RoundedCornerShape(12.dp))
+                                        .size(42.dp)
+                                        .clip(RoundedCornerShape(13.dp))
                                         .background(
                                             Brush.linearGradient(
-                                                colors = listOf(primaryCustom, primaryCustom.copy(alpha = 0.72f))
+                                                colors = listOf(primaryCustom, primaryCustom.copy(alpha = 0.65f))
                                             )
                                         ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        Icons.Default.AccessTimeFilled,
+                                        Icons.Default.Smartphone,
                                         contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(22.dp)
+                                        tint = Color.White.copy(alpha = 0.28f),
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                    Text(
+                                        text = "DH",
+                                        color = Color.White,
+                                        fontSize = 11.5f.sp,
+                                        fontWeight = FontWeight.ExtraBold
                                     )
                                 }
                                 Column {
@@ -182,7 +208,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                             shape = RoundedCornerShape(6.dp)
                                         ) {
                                             Text(
-                                                text = "v4.3",
+                                                text = "v4.4",
                                                 fontSize = 10.sp,
                                                 color = primaryCustom,
                                                 fontWeight = FontWeight.Bold,
