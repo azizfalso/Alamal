@@ -91,10 +91,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var wifiSessions by mutableStateOf<List<WifiSession>>(emptyList())
         private set
 
-    /**
-     * Tracks when the user last deleted an item in this session so the quick "Undo" button in TopAppBar
-     * only stays prominent for recent deletions (15 minutes), while older deleted items remain safely accessible in Trash (#43).
-     */
     var lastSoftDeleteMillis by mutableLongStateOf(0L)
 
     val pendingWifiList: List<WifiSession>
@@ -475,9 +471,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Permanently empties all soft-deleted entries from the Trash Bin (#42).
-     */
     fun emptyTrashBinPermanently() {
         viewModelScope.launch {
             dao.purgeSoftDeletedEntries()
@@ -545,9 +538,14 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun exportPdfReportAsync(title: String, reportEntries: List<WorkEntry>, reportSettlements: List<Settlement>) {
+    fun exportPdfReportAsync(
+        title: String,
+        reportEntries: List<WorkEntry>,
+        reportSettlements: List<Settlement>,
+        carryOver: Double = 0.0
+    ) {
         viewModelScope.launch(Dispatchers.IO) {
-            PdfReportGenerator.generateAndSharePdf(app, title, reportEntries, reportSettlements, pdfDarkMode)
+            PdfReportGenerator.generateAndSharePdf(app, title, reportEntries, reportSettlements, pdfDarkMode, carryOver)
         }
     }
 
