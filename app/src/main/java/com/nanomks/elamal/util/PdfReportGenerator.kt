@@ -22,6 +22,22 @@ import java.util.*
 
 object PdfReportGenerator {
 
+    private fun formatArabicDayAndDate(millis: Long): String {
+        val cal = Calendar.getInstance().apply { timeInMillis = millis }
+        val dayName = when (cal.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.SUNDAY -> "الأحد"
+            Calendar.MONDAY -> "الإثنين"
+            Calendar.TUESDAY -> "الثلاثاء"
+            Calendar.WEDNESDAY -> "الأربعاء"
+            Calendar.THURSDAY -> "الخميس"
+            Calendar.FRIDAY -> "الجمعة"
+            Calendar.SATURDAY -> "السبت"
+            else -> ""
+        }
+        val datePart = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
+        return "$dayName $datePart"
+    }
+
     fun cleanupCachedReports(context: Context, maxAgeMillis: Long = 10 * 60_000L) {
         runCatching {
             val reportsDir = File(context.cacheDir, "reports")
@@ -65,7 +81,6 @@ object PdfReportGenerator {
             }
 
             val dfDateTime = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
-            val dfDate = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
             var totalHourlyMinutes = 0L
             var totalRemote = 0.0
@@ -160,10 +175,11 @@ object PdfReportGenerator {
                 val leftX = 36f
                 val rightX = pageWidth - 36f
                 val baseRowH = 26f
-                val col1 = rightX - 95f
-                val col2 = col1 - 80f
-                val col3 = col2 - 95f
-                val col4 = col3 - 150f
+                // تم توسيع عمود التاريخ إلى 118f ليحتوي على (اليوم + التاريخ) بوضوح
+                val col1 = rightX - 118f
+                val col2 = col1 - 74f
+                val col3 = col2 - 88f
+                val col4 = col3 - 138f
                 val noteColWidth = (col3 - col4 - 14f).toInt().coerceAtLeast(60)
 
                 // Table Header
@@ -182,7 +198,7 @@ object PdfReportGenerator {
                 paint.style = Paint.Style.FILL
                 paint.color = textColor
                 paint.textSize = 11f
-                canvas.drawText("التاريخ", rightX - 8f, y + 17f, paint)
+                canvas.drawText("اليوم والتاريخ", rightX - 8f, y + 17f, paint)
                 canvas.drawText("النوع", col1 - 8f, y + 17f, paint)
                 canvas.drawText("المدة", col2 - 8f, y + 17f, paint)
                 canvas.drawText("الملاحظة", col3 - 8f, y + 17f, paint)
@@ -210,8 +226,8 @@ object PdfReportGenerator {
                     paint.style = Paint.Style.FILL
                     paint.color = textColor
                     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-                    paint.textSize = 10f
-                    canvas.drawText(dfDate.format(Date(e.startTime)), rightX - 8f, y + 17f, paint)
+                    paint.textSize = 9.5f
+                    canvas.drawText(formatArabicDayAndDate(e.startTime), rightX - 6f, y + 17f, paint)
 
                     val badgeBg = when (e.type) {
                         EntryType.HOURLY -> Color.parseColor("#059669")
@@ -224,12 +240,13 @@ object PdfReportGenerator {
                         EntryType.CREDIT -> "كريدي"
                     }
                     paint.color = badgeBg
-                    canvas.drawRoundRect(RectF(col2 + 8f, y + 4f, col1 - 8f, y + 22f), 6f, 6f, paint)
+                    canvas.drawRoundRect(RectF(col2 + 6f, y + 4f, col1 - 6f, y + 22f), 6f, 6f, paint)
                     paint.color = Color.WHITE
-                    paint.textSize = 10f
-                    canvas.drawText(badgeTxt, col1 - 14f, y + 17f, paint)
+                    paint.textSize = 9.5f
+                    canvas.drawText(badgeTxt, col1 - 12f, y + 17f, paint)
 
                     paint.color = textColor
+                    paint.textSize = 10f
                     val durStr = if (e.type == EntryType.HOURLY && e.endTime != null) {
                         val mins = ((e.endTime - e.startTime) / 60000L) - e.breakMinutes
                         ElamalUtils.formatDurationArabic(mins)
@@ -252,7 +269,6 @@ object PdfReportGenerator {
 
                 if (pageIndex == chunks.lastIndex) {
                     if (roundedCarry != 0.0) {
-                        // Row for Entries Subtotal + CarryOver
                         paint.style = Paint.Style.FILL
                         paint.color = headerBg
                         canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
@@ -274,7 +290,6 @@ object PdfReportGenerator {
                         y += baseRowH
                     }
 
-                    // Final Total Row
                     paint.style = Paint.Style.FILL
                     paint.color = headerBg
                     canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
