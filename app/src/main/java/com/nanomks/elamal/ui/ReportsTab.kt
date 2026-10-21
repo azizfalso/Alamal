@@ -9,7 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -42,7 +41,6 @@ fun AppState.ReportsTab() {
     val monthAgo = now - 30 * 86400_000L
     val lastCarryOver = settlements.firstOrNull()?.nextCarryOver ?: 0.0
 
-    // Determine currently selected scope title and entries for rich in-app display AND export
     val scopeTitle = when (selectedReportScope) {
         0 -> "الملخص النشط (الدفتر الحالي)"
         1 -> "تقرير آخر 7 أيام (أسبوع)"
@@ -68,7 +66,6 @@ fun AppState.ReportsTab() {
         }
     }
 
-    // Rich analytics calculations for the active scope
     val scopeNetSum = scopedEntries.sumOf { it.calculatedAmount }
     val scopeEffectiveNet = if (selectedReportScope == 0) scopeNetSum + lastCarryOver else scopeNetSum
     val scopeHourlyEntries = scopedEntries.filter { it.type == EntryType.HOURLY && it.endTime != null }
@@ -79,7 +76,6 @@ fun AppState.ReportsTab() {
     val scopeRemoteMoney = scopedEntries.filter { it.type == EntryType.REMOTE }.sumOf { it.calculatedAmount }
     val scopeCreditMoney = kotlin.math.abs(scopedEntries.filter { it.type == EntryType.CREDIT }.sumOf { it.calculatedAmount })
 
-    // Group by distinct work days for daily average and best day
     val byDayMap = remember(scopedEntries) {
         scopedEntries.groupBy { ElamalUtils.formatDate(it.startTime) }
     }
@@ -93,7 +89,6 @@ fun AppState.ReportsTab() {
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 18.dp)
     ) {
-        // 1. Scope Selector & Export Controls Card (Uniform Button Heights + Explicit PDF Light/Dark Toggle)
         item {
             OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -116,7 +111,6 @@ fun AppState.ReportsTab() {
                             )
                         }
 
-                        // Explicit PDF Theme Toggle Pill (Fixes Issue 6!)
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = if (pdfDarkMode) Color(0xFF1E293B) else Color(0xFFE2E8F0),
@@ -152,7 +146,6 @@ fun AppState.ReportsTab() {
                         color = colorScheme.onSurfaceVariant
                     )
 
-                    // Row 1 of Scope Buttons (Strictly Equal Height = 44.dp & singleLine)
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ScopeOptionButton(
                             title = "الملخص",
@@ -177,7 +170,6 @@ fun AppState.ReportsTab() {
                         )
                     }
 
-                    // Row 2 of Scope Buttons (Strictly Equal Height = 44.dp & singleLine - Fixes Issue 4!)
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ScopeOptionButton(
                             title = "آخر دفعة",
@@ -204,7 +196,6 @@ fun AppState.ReportsTab() {
 
                     HorizontalDivider(color = colorScheme.onSurface.copy(alpha = 0.08f))
 
-                    // Export Action Row for Selected Scope
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = { exportPdfReportAsync(scopeTitle, scopedEntries, settlements) },
@@ -259,7 +250,7 @@ fun AppState.ReportsTab() {
             }
         }
 
-        // 2. Rich In-App Summary & Statistics Dashboard for Selected Scope (Fixes Issue 5 & 12!)
+        // Rich In-App Summary & Statistics Dashboard
         item {
             OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -273,11 +264,11 @@ fun AppState.ReportsTab() {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = scopeTitle,
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 15.sp,
+                                fontSize = 14.5f.sp,
                                 color = primaryCustom
                             )
                             Text(
@@ -295,14 +286,13 @@ fun AppState.ReportsTab() {
                                     text = ElamalUtils.formatMoney(scopeEffectiveNet),
                                     color = primaryCustom,
                                     fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 15.sp,
+                                    fontSize = 14.5f.sp,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                 )
                             }
                         }
                     }
 
-                    // 4 Rich Stat Tiles Grid
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         RichMetricTile(
                             label = "مجموع الساعات",
@@ -337,7 +327,6 @@ fun AppState.ReportsTab() {
                         )
                     }
 
-                    // Visual Distribution Bar inside the card
                     val maxVal = maxOf(scopeHourlyMoney, scopeRemoteMoney, scopeCreditMoney, 10.0)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("التوزيع المالي للنطاق المختار:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -355,7 +344,6 @@ fun AppState.ReportsTab() {
                         }
                     }
 
-                    // Expand/Collapse Records of Selected Scope directly inside Reports!
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -381,7 +369,6 @@ fun AppState.ReportsTab() {
             }
         }
 
-        // In-App Scoped Records List (Allows viewing Archive/Week/Month entries directly in Reports!)
         if (showScopedRecordsList && scopedEntries.isNotEmpty()) {
             items(scopedEntries.take(25), key = { "scope_${it.id}" }) { entryItem ->
                 EntryRowCard(
@@ -393,7 +380,7 @@ fun AppState.ReportsTab() {
             }
         }
 
-        // 3. Enhanced Interactive Monthly Calendar with Rich Colored Day Cards (Fixes Issue 7!)
+        // Enhanced Interactive Monthly Calendar (Fixes clipped numbers in Screenshot 2!)
         item {
             val firstDayCal = Calendar.getInstance().apply {
                 set(Calendar.YEAR, calendarYear)
@@ -445,7 +432,6 @@ fun AppState.ReportsTab() {
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Weekday Names Header
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         weekDaysHeader.forEach { dName ->
                             Text(
@@ -495,35 +481,45 @@ fun AppState.ReportsTab() {
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .height(46.dp)
-                                            .clip(RoundedCornerShape(11.dp))
+                                            .heightIn(min = 52.dp)
+                                            .clip(RoundedCornerShape(12.dp))
                                             .background(boxBg)
                                             .then(
                                                 if (isSelected) {
-                                                    Modifier.border(2.5.dp, primaryCustom, RoundedCornerShape(11.dp))
+                                                    Modifier.border(2.dp, if (dayEntries.isNotEmpty()) Color.White else primaryCustom, RoundedCornerShape(12.dp))
                                                 } else if (isToday) {
-                                                    Modifier.border(1.5.dp, Color(0xFFD97706), RoundedCornerShape(11.dp))
+                                                    Modifier.border(1.5.dp, Color(0xFFF59E0B), RoundedCornerShape(12.dp))
                                                 } else Modifier
                                             )
                                             .clickable {
                                                 selectedCalendarDay = if (selectedCalendarDay == dayNum) -1 else dayNum
-                                            },
+                                            }
+                                            .padding(vertical = 4.dp, horizontal = 2.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
                                             Text(
                                                 text = "$dayNum",
                                                 fontSize = 12.sp,
+                                                lineHeight = 13.sp,
                                                 color = txtCol,
-                                                fontWeight = FontWeight.ExtraBold
+                                                fontWeight = FontWeight.ExtraBold,
+                                                maxLines = 1
                                             )
                                             if (dayEntries.isNotEmpty()) {
+                                                Spacer(modifier = Modifier.height(1.dp))
                                                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                                                     Text(
                                                         text = if (daySum > 0) "+${daySum.toInt()}" else "${daySum.toInt()}",
                                                         fontSize = 9.sp,
+                                                        lineHeight = 10.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = Color.White.copy(alpha = 0.95f)
+                                                        color = Color.White.copy(alpha = 0.95f),
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Clip
                                                     )
                                                 }
                                             }
@@ -536,7 +532,6 @@ fun AppState.ReportsTab() {
                         }
                     }
 
-                    // Rich Selected Day Details Card (Fixes Issue 7!)
                     if (selectedCalendarDay in 1..daysInMonth) {
                         val selectedList = allEntries.filter {
                             val c = Calendar.getInstance().apply { timeInMillis = it.startTime }
@@ -552,7 +547,6 @@ fun AppState.ReportsTab() {
                         HorizontalDivider(color = colorScheme.onSurface.copy(alpha = 0.1f))
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Day Summary Header Banner
                         Surface(
                             color = primaryCustom.copy(alpha = 0.12f),
                             shape = RoundedCornerShape(14.dp),
