@@ -1,7 +1,19 @@
 <resources>
     <string name="app_name">العمل</string>
     <string name="widget_name">ودجت العمل</string>
+    <string name="tab_ledger">الدفتر</string>
+    <string name="tab_settlements">الدفعات</string>
+    <string name="tab_reports">التقارير</string>
+    <string name="tab_settings">الإعدادات</string>
+    <string name="btn_clock_in">تسجيل دخول</string>
+    <string name="btn_remote">عن بعد</string>
+    <string name="btn_credit">كريدي (-)</string>
+    <string name="badge_hourly">ساعات</string>
+    <string name="badge_remote">عن بعد</string>
+    <string name="badge_credit">كريدي</string>
+    <string name="net_due_title">الصافي المستحق حالياً</string>
+    <string name="empty_ledger_title">لا توجد سجلات عمل مطابقة في الدفتر حالياً</string>
+    <string name="empty_ledger_subtitle">اضغط على «تسجيل دخول» أو أيقونة الساعات اليدوية للبدء</string>
+    <string name="trash_bin_title">سلة المحذوفات المؤقتة</string>
+    <string name="empty_trash_action">إفراغ السلة نهائياً</string>
 </resources>
-
-
-
