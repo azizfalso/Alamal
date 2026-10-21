@@ -34,6 +34,52 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.*
 
+@Composable
+private fun QuickBreakField(
+    breakInput: String,
+    accentColor: Color,
+    onBreakChange: (String) -> Unit
+) {
+    val presets = listOf(0, 15, 30, 45, 60)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            value = breakInput,
+            onValueChange = { if (it.all { ch -> ch.isDigit() }) onBreakChange(it) },
+            label = { Text("وقت الاستراحة (بالدقائق)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp)
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            presets.forEach { mins ->
+                val isSelected = (breakInput.toIntOrNull() ?: 0) == mins
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onBreakChange(mins.toString()) },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) accentColor else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                ) {
+                    Text(
+                        text = if (mins == 0) "بدون" else "${ElamalUtils.localizeDigits(mins.toString())}د",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(vertical = 6.dp)
+                            .wrapContentWidth(Alignment.CenterHorizontally)
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DateTimePickerSection(
@@ -47,6 +93,7 @@ private fun DateTimePickerSection(
     var showTimePicker by remember { mutableStateOf(false) }
     var useKeyboardTimeInput by remember { mutableStateOf(false) }
 
+    val dayName = remember(timestampMillis) { ElamalUtils.getArabicDayName(timestampMillis) }
     val dateStr = remember(timestampMillis) { ElamalUtils.formatDate(timestampMillis) }
     val timeStr = remember(timestampMillis) { ElamalUtils.formatTime(timestampMillis) }
 
@@ -66,7 +113,7 @@ private fun DateTimePickerSection(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = label,
+                    text = "$label ($dayName)",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = accentColor
@@ -302,36 +349,87 @@ private fun DateOnlyPickerButton(
     label: String,
     dateMillis: Long,
     accentColor: Color,
+    showQuickDays: Boolean = false,
     onDateChange: (Long) -> Unit
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
+    val dayName = remember(dateMillis) { ElamalUtils.getArabicDayName(dateMillis) }
     val dateStr = remember(dateMillis) { ElamalUtils.formatDate(dateMillis) }
 
-    OutlinedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { showDatePicker = true },
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.3f)),
-        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Row(
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { showDatePicker = true },
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.3f)),
+            colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
-            Text(text = label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = accentColor)
             Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Text(text = dateStr, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                Text(text = "$label ($dayName)", fontSize = 12.5f.sp, fontWeight = FontWeight.Bold, color = accentColor)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Text(text = dateStr, fontWeight = FontWeight.ExtraBold, fontSize = 13.5f.sp)
+                    }
+                    Icon(Icons.Default.CalendarMonth, contentDescription = label, tint = accentColor, modifier = Modifier.size(18.dp))
                 }
-                Icon(Icons.Default.CalendarMonth, contentDescription = label, tint = accentColor, modifier = Modifier.size(18.dp))
+            }
+        }
+
+        if (showQuickDays) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = accentColor.copy(alpha = 0.14f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onDateChange(System.currentTimeMillis()) }
+                ) {
+                    Text(
+                        text = "اليوم",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = accentColor,
+                        modifier = Modifier
+                            .padding(vertical = 5.dp)
+                            .wrapContentWidth(Alignment.CenterHorizontally)
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable {
+                            val yest = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+                            onDateChange(yest)
+                        }
+                ) {
+                    Text(
+                        text = "أمس",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(vertical = 5.dp)
+                            .wrapContentWidth(Alignment.CenterHorizontally)
+                    )
+                }
             }
         }
     }
@@ -347,12 +445,13 @@ private fun DateOnlyPickerButton(
                             val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
                                 timeInMillis = utcMillis
                             }
+                            val nowCal = Calendar.getInstance()
                             val localCal = Calendar.getInstance().apply {
                                 set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
                                 set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
                                 set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
-                                set(Calendar.HOUR_OF_DAY, 0)
-                                set(Calendar.MINUTE, 0)
+                                set(Calendar.HOUR_OF_DAY, nowCal.get(Calendar.HOUR_OF_DAY))
+                                set(Calendar.MINUTE, nowCal.get(Calendar.MINUTE))
                                 set(Calendar.SECOND, 0)
                                 set(Calendar.MILLISECOND, 0)
                             }
@@ -392,14 +491,10 @@ fun AppState.AppDialogs() {
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text("مدة العمل المسجلة: ${ElamalUtils.formatDurationArabic(elapsedMins)}", fontWeight = FontWeight.Bold, color = primaryCustom)
-                    OutlinedTextField(
-                        value = breakInput,
-                        onValueChange = { if (it.all { ch -> ch.isDigit() }) breakInput = it },
-                        label = { Text("وقت الاستراحة (بالدقائق)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                    QuickBreakField(
+                        breakInput = breakInput,
+                        accentColor = primaryCustom,
+                        onBreakChange = { breakInput = it }
                     )
                     OutlinedTextField(
                         value = noteInput,
@@ -514,7 +609,6 @@ fun AppState.AppDialogs() {
                         accentColor = primaryCustom,
                         onTimestampChange = { newStart ->
                             startMillis = newStart
-                            // Keep end date synced on the same day if endMillis fell behind startMillis
                             if (endMillis <= newStart) {
                                 val sCal = Calendar.getInstance().apply { timeInMillis = newStart }
                                 val eCal = Calendar.getInstance().apply {
@@ -571,14 +665,10 @@ fun AppState.AppDialogs() {
                         )
                     }
 
-                    OutlinedTextField(
-                        value = breakInput,
-                        onValueChange = { if (it.all { ch -> ch.isDigit() }) breakInput = it },
-                        label = { Text("استراحة (دقائق)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                    QuickBreakField(
+                        breakInput = breakInput,
+                        accentColor = primaryCustom,
+                        onBreakChange = { breakInput = it }
                     )
                     OutlinedTextField(
                         value = noteInput,
@@ -609,10 +699,11 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 4. Remote Entry Dialog
+    // 4. Remote Entry Dialog (With Date Picker)
     if (showRemoteDialog) {
         var amountInput by rememberSaveable { mutableStateOf("") }
         var noteInput by rememberSaveable { mutableStateOf("") }
+        var entryTimestamp by rememberSaveable { mutableLongStateOf(System.currentTimeMillis()) }
 
         AlertDialog(
             onDismissRequest = { showRemoteDialog = false },
@@ -623,6 +714,13 @@ fun AppState.AppDialogs() {
                     modifier = Modifier.fillMaxWidth().imePadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    DateOnlyPickerButton(
+                        label = "تاريخ العملية",
+                        dateMillis = entryTimestamp,
+                        accentColor = Color(0xFF2563EB),
+                        showQuickDays = true,
+                        onDateChange = { entryTimestamp = it }
+                    )
                     OutlinedTextField(
                         value = amountInput,
                         onValueChange = { if (it.matches(Regex("""^\d*\.?\d*$"""))) amountInput = it },
@@ -647,7 +745,7 @@ fun AppState.AppDialogs() {
                     onClick = {
                         val amt = amountInput.toDoubleOrNull() ?: 0.0
                         if (amt > 0.0) {
-                            saveFixedEntry(EntryType.REMOTE, amt, noteInput)
+                            saveFixedEntry(EntryType.REMOTE, amt, noteInput, entryTimestamp)
                         } else {
                             showNotice("⚠️ أدخل مبلغاً صحيحاً أكبر من صفر")
                         }
@@ -661,10 +759,11 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 5. Credit (Advance/Deduction) Dialog
+    // 5. Credit (Advance/Deduction) Dialog (With Date Picker)
     if (showCreditDialog) {
         var amountInput by rememberSaveable { mutableStateOf("") }
         var noteInput by rememberSaveable { mutableStateOf("") }
+        var entryTimestamp by rememberSaveable { mutableLongStateOf(System.currentTimeMillis()) }
 
         AlertDialog(
             onDismissRequest = { showCreditDialog = false },
@@ -675,6 +774,13 @@ fun AppState.AppDialogs() {
                     modifier = Modifier.fillMaxWidth().imePadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    DateOnlyPickerButton(
+                        label = "تاريخ السلفة / الخصم",
+                        dateMillis = entryTimestamp,
+                        accentColor = Color(0xFFDC2626),
+                        showQuickDays = true,
+                        onDateChange = { entryTimestamp = it }
+                    )
                     OutlinedTextField(
                         value = amountInput,
                         onValueChange = { if (it.matches(Regex("""^\d*\.?\d*$"""))) amountInput = it },
@@ -699,7 +805,7 @@ fun AppState.AppDialogs() {
                     onClick = {
                         val amt = amountInput.toDoubleOrNull() ?: 0.0
                         if (amt > 0.0) {
-                            saveFixedEntry(EntryType.CREDIT, -amt, noteInput)
+                            saveFixedEntry(EntryType.CREDIT, -amt, noteInput, entryTimestamp)
                         } else {
                             showNotice("⚠️ أدخل مبلغاً صحيحاً أكبر من صفر")
                         }
@@ -804,14 +910,10 @@ fun AppState.AppDialogs() {
                             accentColor = primaryCustom,
                             onTimestampChange = { endMillis = it }
                         )
-                        OutlinedTextField(
-                            value = breakStr,
-                            onValueChange = { if (it.all { ch -> ch.isDigit() }) breakStr = it },
-                            label = { Text("استراحة (دقائق)") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp)
+                        QuickBreakField(
+                            breakInput = breakStr,
+                            accentColor = primaryCustom,
+                            onBreakChange = { breakStr = it }
                         )
                     } else {
                         OutlinedTextField(
@@ -850,6 +952,65 @@ fun AppState.AppDialogs() {
             },
             dismissButton = {
                 TextButton(onClick = { editingEntry = null }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    // 7-B. Edit Settlement Dialog (Previously Missing!)
+    val settlementToEdit = editingSettlement
+    if (settlementToEdit != null) {
+        var sTimestamp by rememberSaveable(settlementToEdit.id) { mutableLongStateOf(settlementToEdit.timestamp) }
+        var paidStr by rememberSaveable(settlementToEdit.id) { mutableStateOf(settlementToEdit.amountPaid.toString()) }
+        var noteStr by rememberSaveable(settlementToEdit.id) { mutableStateOf(settlementToEdit.note) }
+
+        AlertDialog(
+            onDismissRequest = { editingSettlement = null },
+            shape = RoundedCornerShape(22.dp),
+            title = { Text("تعديل الدفعة المؤرشفة", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    DateTimePickerSection(
+                        label = "تاريخ ووقت الدفعة",
+                        timestampMillis = sTimestamp,
+                        accentColor = primaryCustom,
+                        onTimestampChange = { sTimestamp = it }
+                    )
+                    OutlinedTextField(
+                        value = paidStr,
+                        onValueChange = { if (it.matches(Regex("""^\d*\.?\d*$"""))) paidStr = it },
+                        label = { Text("المبلغ المستلم فعلياً (DH)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = noteStr,
+                        onValueChange = { noteStr = it },
+                        label = { Text("ملاحظة الدفعة") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val newPaid = paidStr.toDoubleOrNull() ?: settlementToEdit.amountPaid
+                        saveEditedSettlement(settlementToEdit, sTimestamp, newPaid, noteStr)
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("حفظ وإعادة حساب المرحّل") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingSettlement = null }) { Text("إلغاء") }
             }
         )
     }
@@ -1038,14 +1199,22 @@ fun AppState.AppDialogs() {
             confirmButton = {
                 Button(
                     onClick = {
+                        val startOfDayMillis = Calendar.getInstance().apply {
+                            timeInMillis = startMillis
+                            set(Calendar.HOUR_OF_DAY, 0)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }.timeInMillis
                         val endOfDayMillis = Calendar.getInstance().apply {
                             timeInMillis = endMillis
                             set(Calendar.HOUR_OF_DAY, 23)
                             set(Calendar.MINUTE, 59)
                             set(Calendar.SECOND, 59)
+                            set(Calendar.MILLISECOND, 999)
                         }.timeInMillis
-                        if (endOfDayMillis >= startMillis) {
-                            customReportStartMillis = startMillis
+                        if (endOfDayMillis >= startOfDayMillis) {
+                            customReportStartMillis = startOfDayMillis
                             customReportEndMillis = endOfDayMillis
                             selectedReportScope = 5
                             showCustomPeriodPdfDialog = false
