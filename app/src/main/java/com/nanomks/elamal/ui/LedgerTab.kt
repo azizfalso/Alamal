@@ -27,6 +27,44 @@ import androidx.compose.ui.unit.sp
 import com.nanomks.elamal.data.EntryType
 import com.nanomks.elamal.util.ElamalUtils
 
+@Composable
+private fun HeroMiniStatPill(
+    label: String,
+    valueText: String,
+    valueColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = Color.White.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Text(
+                    text = valueText,
+                    color = valueColor,
+                    fontSize = 11.5f.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppState.LedgerTab() {
@@ -43,10 +81,10 @@ fun AppState.LedgerTab() {
     val activeRemoteSum = entries.filter { it.type == EntryType.REMOTE }.sumOf { it.calculatedAmount }
     val activeCreditSum = kotlin.math.abs(entries.filter { it.type == EntryType.CREDIT }.sumOf { it.calculatedAmount })
 
-    // Hero Financial Dashboard Card
+    // Hero Financial Dashboard Card (Compact & Never Wraps Vertically!)
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(22.dp),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
     ) {
         Box(
@@ -61,7 +99,7 @@ fun AppState.LedgerTab() {
                         }
                     )
                 )
-                .padding(horizontal = 20.dp, vertical = 18.dp)
+                .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -85,7 +123,8 @@ fun AppState.LedgerTab() {
                             text = if (activeClockIn > 0L) "جلسة جارية (بدأت ${ElamalUtils.formatTime(activeClockIn)})" else "الصافي المستحق حالياً",
                             color = Color.White.copy(alpha = 0.92f),
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
                         )
                     }
                     Row(
@@ -104,7 +143,7 @@ fun AppState.LedgerTab() {
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
-                                    Text("تعديل البداية", color = Color.White, fontSize = 10.5f.sp, fontWeight = FontWeight.Bold)
+                                    Text("تعديل البداية", color = Color.White, fontSize = 10.5f.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                                 }
                             }
                         }
@@ -115,15 +154,16 @@ fun AppState.LedgerTab() {
                             Text(
                                 text = "⏱ ${ElamalUtils.formatDurationArabic(totalMinutesActive + elapsedActiveMin)}",
                                 color = Color.White,
-                                fontSize = 12.sp,
+                                fontSize = 11.5f.sp,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -133,9 +173,10 @@ fun AppState.LedgerTab() {
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Text(
                             text = ElamalUtils.formatMoney(totalNet),
-                            fontSize = 32.sp,
+                            fontSize = 30.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
+                            color = Color.White,
+                            maxLines = 1
                         )
                     }
                     if (activeClockIn > 0L) {
@@ -146,8 +187,9 @@ fun AppState.LedgerTab() {
                             Text(
                                 text = "+${ElamalUtils.formatMoney(liveEarnedNow)} جارية",
                                 color = Color(0xFFA7F3D0),
-                                fontSize = 12.sp,
+                                fontSize = 11.5f.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
@@ -155,42 +197,41 @@ fun AppState.LedgerTab() {
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
-                Spacer(modifier = Modifier.height(8.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "ساعات: ${ElamalUtils.formatMoney(activeHourlySum)}",
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    if (activeRemoteSum > 0.0) {
-                        Text(
-                            text = "عن بعد: +${ElamalUtils.formatMoney(activeRemoteSum)}",
-                            color = Color(0xFF93C5FD),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
+                // Clean 2x2 Grid for Breakdown Pills (Never wraps vertically or squishes text!)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        HeroMiniStatPill(
+                            label = "ساعات",
+                            valueText = ElamalUtils.formatMoney(activeHourlySum),
+                            valueColor = Color.White,
+                            modifier = Modifier.weight(1f)
+                        )
+                        HeroMiniStatPill(
+                            label = "عن بعد",
+                            valueText = "+${ElamalUtils.formatMoney(activeRemoteSum)}",
+                            valueColor = Color(0xFF93C5FD),
+                            modifier = Modifier.weight(1f)
                         )
                     }
-                    if (activeCreditSum > 0.0) {
-                        Text(
-                            text = "كريدي: -${ElamalUtils.formatMoney(activeCreditSum)}",
-                            color = Color(0xFFFCA5A5),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        HeroMiniStatPill(
+                            label = "كريدي",
+                            valueText = "-${ElamalUtils.formatMoney(activeCreditSum)}",
+                            valueColor = Color(0xFFFCA5A5),
+                            modifier = Modifier.weight(1f)
                         )
-                    }
-                    if (lastCarryOver != 0.0) {
-                        Text(
-                            text = "مرحّل: ${ElamalUtils.formatMoney(lastCarryOver)}",
-                            color = Color(0xFFFDE68A),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                        HeroMiniStatPill(
+                            label = "مرحّل",
+                            valueText = ElamalUtils.formatMoney(lastCarryOver),
+                            valueColor = Color(0xFFFDE68A),
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }
@@ -198,9 +239,9 @@ fun AppState.LedgerTab() {
         }
     }
 
-    Spacer(modifier = Modifier.height(12.dp))
+    Spacer(modifier = Modifier.height(10.dp))
 
-    // Main Action Buttons (Dark-mode aware colors & no text clipping)
+    // Main Action Buttons
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -212,7 +253,7 @@ fun AppState.LedgerTab() {
             },
             modifier = Modifier
                 .weight(1.45f)
-                .heightIn(min = 50.dp),
+                .heightIn(min = 48.dp),
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
             colors = ButtonDefaults.buttonColors(
@@ -236,7 +277,7 @@ fun AppState.LedgerTab() {
 
         FilledTonalIconButton(
             onClick = { showManualHourlyDialog = true },
-            modifier = Modifier.size(50.dp),
+            modifier = Modifier.size(48.dp),
             shape = RoundedCornerShape(14.dp)
         ) {
             Icon(Icons.Default.MoreTime, contentDescription = "إضافة ساعات يدوية")
@@ -246,7 +287,7 @@ fun AppState.LedgerTab() {
             onClick = { showRemoteDialog = true },
             modifier = Modifier
                 .weight(0.95f)
-                .heightIn(min = 50.dp),
+                .heightIn(min = 48.dp),
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
             colors = ButtonDefaults.filledTonalButtonColors(
@@ -269,7 +310,7 @@ fun AppState.LedgerTab() {
             onClick = { showCreditDialog = true },
             modifier = Modifier
                 .weight(0.95f)
-                .heightIn(min = 50.dp),
+                .heightIn(min = 48.dp),
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
             colors = ButtonDefaults.filledTonalButtonColors(
@@ -289,7 +330,7 @@ fun AppState.LedgerTab() {
 
     // Wi-Fi Sessions Pending Review Card
     if (wifiSessions.isNotEmpty()) {
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
         OutlinedCard(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -364,7 +405,7 @@ fun AppState.LedgerTab() {
     }
 
     if (searchFilterEnabled) {
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -388,16 +429,16 @@ fun AppState.LedgerTab() {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 6.dp),
+                .padding(vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            FilterChip(selected = filterType == null, onClick = { filterType = null }, label = { Text("الكل (${entries.size})", fontSize = 12.sp) })
-            FilterChip(selected = filterType == EntryType.HOURLY, onClick = { filterType = EntryType.HOURLY }, label = { Text("ساعات ($cntHourly)", fontSize = 12.sp) })
-            FilterChip(selected = filterType == EntryType.REMOTE, onClick = { filterType = EntryType.REMOTE }, label = { Text("عن بعد ($cntRemote)", fontSize = 12.sp) })
-            FilterChip(selected = filterType == EntryType.CREDIT, onClick = { filterType = EntryType.CREDIT }, label = { Text("كريدي ($cntCredit)", fontSize = 12.sp) })
+            FilterChip(selected = filterType == null, onClick = { filterType = null }, label = { Text("الكل (${entries.size})", fontSize = 11.5f.sp, maxLines = 1) })
+            FilterChip(selected = filterType == EntryType.HOURLY, onClick = { filterType = EntryType.HOURLY }, label = { Text("ساعات ($cntHourly)", fontSize = 11.5f.sp, maxLines = 1) })
+            FilterChip(selected = filterType == EntryType.REMOTE, onClick = { filterType = EntryType.REMOTE }, label = { Text("عن بعد ($cntRemote)", fontSize = 11.5f.sp, maxLines = 1) })
+            FilterChip(selected = filterType == EntryType.CREDIT, onClick = { filterType = EntryType.CREDIT }, label = { Text("كريدي ($cntCredit)", fontSize = 11.5f.sp, maxLines = 1) })
         }
     } else {
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
     }
 
     val filtered = entries.filter {
