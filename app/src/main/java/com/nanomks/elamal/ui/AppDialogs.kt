@@ -1,13 +1,14 @@
 package com.nanomks.elamal.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -17,27 +18,363 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewModelScope
 import com.nanomks.elamal.data.EntryType
-import com.nanomks.elamal.data.WorkEntry
 import com.nanomks.elamal.util.ElamalSecurity
 import com.nanomks.elamal.util.ElamalUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
 import java.util.*
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateTimePickerSection(
+    label: String,
+    timestampMillis: Long,
+    accentColor: Color,
+    showQuickDays: Boolean = true,
+    onTimestampChange: (Long) -> Unit
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var useKeyboardTimeInput by remember { mutableStateOf(false) }
+
+    val dateStr = remember(timestampMillis) { ElamalUtils.formatDate(timestampMillis) }
+    val timeStr = remember(timestampMillis) { ElamalUtils.formatTime(timestampMillis) }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.25f))
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor
+                )
+                if (showQuickDays) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = accentColor.copy(alpha = 0.14f),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    val nowCal = Calendar.getInstance()
+                                    val targetCal = Calendar.getInstance().apply {
+                                        timeInMillis = timestampMillis
+                                        set(Calendar.YEAR, nowCal.get(Calendar.YEAR))
+                                        set(Calendar.MONTH, nowCal.get(Calendar.MONTH))
+                                        set(Calendar.DAY_OF_MONTH, nowCal.get(Calendar.DAY_OF_MONTH))
+                                    }
+                                    onTimestampChange(targetCal.timeInMillis)
+                                }
+                        ) {
+                            Text(
+                                text = "اليوم",
+                                fontSize = 10.5f.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = accentColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    val yestCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+                                    val targetCal = Calendar.getInstance().apply {
+                                        timeInMillis = timestampMillis
+                                        set(Calendar.YEAR, yestCal.get(Calendar.YEAR))
+                                        set(Calendar.MONTH, yestCal.get(Calendar.MONTH))
+                                        set(Calendar.DAY_OF_MONTH, yestCal.get(Calendar.DAY_OF_MONTH))
+                                    }
+                                    onTimestampChange(targetCal.timeInMillis)
+                                }
+                        ) {
+                            Text(
+                                text = "أمس",
+                                fontSize = 10.5f.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Date Button
+                OutlinedCard(
+                    modifier = Modifier
+                        .weight(1.15f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { showDatePicker = true },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarMonth,
+                            contentDescription = "اختيار التاريخ",
+                            tint = accentColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = dateStr,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+
+                // Time Button
+                OutlinedCard(
+                    modifier = Modifier
+                        .weight(0.85f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { showTimePicker = true },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccessTime,
+                            contentDescription = "اختيار الوقت",
+                            tint = accentColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = timeStr,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 13.5f.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = timestampMillis)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { utcMillis ->
+                            val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                                timeInMillis = utcMillis
+                            }
+                            val localCal = Calendar.getInstance().apply {
+                                timeInMillis = timestampMillis
+                                set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+                                set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+                                set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
+                            }
+                            onTimestampChange(localCal.timeInMillis)
+                        }
+                        showDatePicker = false
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) { Text("تأكيد التاريخ") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("إلغاء") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    if (showTimePicker) {
+        val cal = remember(timestampMillis) {
+            Calendar.getInstance().apply { timeInMillis = timestampMillis }
+        }
+        val timePickerState = rememberTimePickerState(
+            initialHour = cal.get(Calendar.HOUR_OF_DAY),
+            initialMinute = cal.get(Calendar.MINUTE),
+            is24Hour = true
+        )
+
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            shape = RoundedCornerShape(22.dp),
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(label, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    IconButton(onClick = { useKeyboardTimeInput = !useKeyboardTimeInput }) {
+                        Icon(
+                            imageVector = if (useKeyboardTimeInput) Icons.Default.Schedule else Icons.Default.Keyboard,
+                            contentDescription = "تبديل طريقة الإدخال",
+                            tint = accentColor
+                        )
+                    }
+                }
+            },
+            text = {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        if (useKeyboardTimeInput) {
+                            TimeInput(state = timePickerState)
+                        } else {
+                            TimePicker(state = timePickerState)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val updatedCal = Calendar.getInstance().apply {
+                            timeInMillis = timestampMillis
+                            set(Calendar.HOUR_OF_DAY, timePickerState.hour)
+                            set(Calendar.MINUTE, timePickerState.minute)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                        onTimestampChange(updatedCal.timeInMillis)
+                        showTimePicker = false
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) { Text("تأكيد الوقت") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("إلغاء") }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateOnlyPickerButton(
+    label: String,
+    dateMillis: Long,
+    accentColor: Color,
+    onDateChange: (Long) -> Unit
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    val dateStr = remember(dateMillis) { ElamalUtils.formatDate(dateMillis) }
+
+    OutlinedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { showDatePicker = true },
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.3f)),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(text = label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = accentColor)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Text(text = dateStr, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                }
+                Icon(Icons.Default.CalendarMonth, contentDescription = label, tint = accentColor, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = dateMillis)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { utcMillis ->
+                            val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                                timeInMillis = utcMillis
+                            }
+                            val localCal = Calendar.getInstance().apply {
+                                set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+                                set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+                                set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
+                                set(Calendar.HOUR_OF_DAY, 0)
+                                set(Calendar.MINUTE, 0)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }
+                            onDateChange(localCal.timeInMillis)
+                        }
+                        showDatePicker = false
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) { Text("تأكيد") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("إلغاء") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppState.AppDialogs() {
-    val dfDateTime = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US) }
 
     // 1. Clock-Out Dialog
     if (showClockOutDialog) {
@@ -93,7 +430,7 @@ fun AppState.AppDialogs() {
 
     // 2. Edit Active Clock-In Start Dialog
     if (showEditActiveClockInDialog) {
-        var startStr by rememberSaveable(activeClockIn) { mutableStateOf(dfDateTime.format(Date(activeClockIn))) }
+        var startMillis by rememberSaveable(activeClockIn) { mutableLongStateOf(activeClockIn) }
         AlertDialog(
             onDismissRequest = { showEditActiveClockInDialog = false },
             shape = RoundedCornerShape(22.dp),
@@ -103,26 +440,22 @@ fun AppState.AppDialogs() {
                     modifier = Modifier.fillMaxWidth().imePadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("أدخل وقت البداية بالتنسيق (yyyy-MM-dd HH:mm):", fontSize = 12.sp, color = colorScheme.onSurfaceVariant)
-                    OutlinedTextField(
-                        value = startStr,
-                        onValueChange = { startStr = it },
-                        label = { Text("وقت البداية") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                    DateTimePickerSection(
+                        label = "وقت بداية الجلسة",
+                        timestampMillis = startMillis,
+                        accentColor = primaryCustom,
+                        onTimestampChange = { startMillis = it }
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val parsedMillis = runCatching { dfDateTime.parse(startStr.trim())?.time }.getOrNull()
-                        if (parsedMillis != null && parsedMillis <= System.currentTimeMillis()) {
-                            updateActiveClockInStart(parsedMillis)
+                        if (startMillis <= System.currentTimeMillis()) {
+                            updateActiveClockInStart(startMillis)
                             showEditActiveClockInDialog = false
                         } else {
-                            showNotice("⚠️ صيغة التاريخ غير صحيحة أو الوقت في المستقبل!")
+                            showNotice("⚠️ لا يمكن أن يكون وقت البداية في المستقبل!")
                         }
                     },
                     shape = RoundedCornerShape(12.dp)
@@ -136,10 +469,32 @@ fun AppState.AppDialogs() {
 
     // 3. Manual Hourly Entry Dialog
     if (showManualHourlyDialog) {
-        var startStr by rememberSaveable { mutableStateOf(SimpleDateFormat("yyyy-MM-dd 09:00", Locale.US).format(Date())) }
-        var endStr by rememberSaveable { mutableStateOf(SimpleDateFormat("yyyy-MM-dd 17:00", Locale.US).format(Date())) }
+        var startMillis by rememberSaveable {
+            val c = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, 9)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            mutableLongStateOf(c.timeInMillis)
+        }
+        var endMillis by rememberSaveable {
+            val c = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, 17)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            mutableLongStateOf(c.timeInMillis)
+        }
         var breakInput by rememberSaveable { mutableStateOf("0") }
         var noteInput by rememberSaveable { mutableStateOf("") }
+
+        val bMinPreview = breakInput.toIntOrNull() ?: 0
+        val previewNetMins = (((endMillis - startMillis) / 60000L) - bMinPreview).coerceAtLeast(0L)
+        val previewPay = if (endMillis > startMillis) {
+            ElamalUtils.calculateHourlyPay(startMillis, endMillis, bMinPreview, hourlyRate)
+        } else 0.0
 
         AlertDialog(
             onDismissRequest = { showManualHourlyDialog = false },
@@ -147,29 +502,80 @@ fun AppState.AppDialogs() {
             title = { Text("إضافة سجل ساعات يدوي", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
-                    modifier = Modifier.fillMaxWidth().imePadding(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    OutlinedTextField(
-                        value = startStr,
-                        onValueChange = { startStr = it },
-                        label = { Text("وقت البداية (yyyy-MM-dd HH:mm)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                    DateTimePickerSection(
+                        label = "وقت البداية",
+                        timestampMillis = startMillis,
+                        accentColor = primaryCustom,
+                        onTimestampChange = { newStart ->
+                            startMillis = newStart
+                            // Keep end date synced on the same day if endMillis fell behind startMillis
+                            if (endMillis <= newStart) {
+                                val sCal = Calendar.getInstance().apply { timeInMillis = newStart }
+                                val eCal = Calendar.getInstance().apply {
+                                    timeInMillis = endMillis
+                                    set(Calendar.YEAR, sCal.get(Calendar.YEAR))
+                                    set(Calendar.MONTH, sCal.get(Calendar.MONTH))
+                                    set(Calendar.DAY_OF_MONTH, sCal.get(Calendar.DAY_OF_MONTH))
+                                }
+                                endMillis = if (eCal.timeInMillis > newStart) eCal.timeInMillis else newStart + 8 * 3600_000L
+                            }
+                        }
                     )
-                    OutlinedTextField(
-                        value = endStr,
-                        onValueChange = { endStr = it },
-                        label = { Text("وقت النهاية (yyyy-MM-dd HH:mm)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+
+                    DateTimePickerSection(
+                        label = "وقت النهاية",
+                        timestampMillis = endMillis,
+                        accentColor = primaryCustom,
+                        onTimestampChange = { endMillis = it }
                     )
+
+                    if (endMillis > startMillis) {
+                        Surface(
+                            color = primaryCustom.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "المدة الصافية: ${ElamalUtils.formatDurationArabic(previewNetMins)}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = primaryCustom
+                                )
+                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                    Text(
+                                        text = ElamalUtils.formatMoney(previewPay),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = primaryCustom
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "⚠️ وقت النهاية يجب أن يكون بعد وقت البداية",
+                            fontSize = 11.5f.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFEF4444)
+                        )
+                    }
+
                     OutlinedTextField(
                         value = breakInput,
                         onValueChange = { if (it.all { ch -> ch.isDigit() }) breakInput = it },
                         label = { Text("استراحة (دقائق)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp)
@@ -187,13 +593,11 @@ fun AppState.AppDialogs() {
             confirmButton = {
                 Button(
                     onClick = {
-                        val sMillis = runCatching { dfDateTime.parse(startStr.trim())?.time }.getOrNull()
-                        val eMillis = runCatching { dfDateTime.parse(endStr.trim())?.time }.getOrNull()
                         val bMin = breakInput.toIntOrNull() ?: 0
-                        if (sMillis != null && eMillis != null && eMillis > sMillis) {
-                            saveManualHourlyEntry(sMillis, eMillis, bMin, noteInput, false)
+                        if (endMillis > startMillis) {
+                            saveManualHourlyEntry(startMillis, endMillis, bMin, noteInput, false)
                         } else {
-                            showNotice("⚠️ أوقات غير صالحة؛ تأكد من صيغة التاريخ.")
+                            showNotice("⚠️ وقت النهاية يجب أن يكون بعد وقت البداية.")
                         }
                     },
                     shape = RoundedCornerShape(12.dp)
@@ -295,7 +699,7 @@ fun AppState.AppDialogs() {
                     onClick = {
                         val amt = amountInput.toDoubleOrNull() ?: 0.0
                         if (amt > 0.0) {
-                            saveFixedEntry(EntryType.CREDIT, amt, noteInput)
+                            saveFixedEntry(EntryType.CREDIT, -amt, noteInput)
                         } else {
                             showNotice("⚠️ أدخل مبلغاً صحيحاً أكبر من صفر")
                         }
@@ -368,8 +772,8 @@ fun AppState.AppDialogs() {
     // 7. Edit Entry Dialog
     val itemToEdit = editingEntry
     if (itemToEdit != null) {
-        var startStr by rememberSaveable(itemToEdit.id) { mutableStateOf(dfDateTime.format(Date(itemToEdit.startTime))) }
-        var endStr by rememberSaveable(itemToEdit.id) { mutableStateOf(itemToEdit.endTime?.let { dfDateTime.format(Date(it)) } ?: "") }
+        var startMillis by rememberSaveable(itemToEdit.id) { mutableLongStateOf(itemToEdit.startTime) }
+        var endMillis by rememberSaveable(itemToEdit.id) { mutableLongStateOf(itemToEdit.endTime ?: itemToEdit.startTime) }
         var breakStr by rememberSaveable(itemToEdit.id) { mutableStateOf(itemToEdit.breakMinutes.toString()) }
         var amountStr by rememberSaveable(itemToEdit.id) { mutableStateOf(kotlin.math.abs(itemToEdit.calculatedAmount).toString()) }
         var noteStr by rememberSaveable(itemToEdit.id) { mutableStateOf(itemToEdit.note) }
@@ -380,30 +784,31 @@ fun AppState.AppDialogs() {
             title = { Text("تعديل السجل #${ElamalUtils.localizeDigits("${itemToEdit.id}")}", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
-                    modifier = Modifier.fillMaxWidth().imePadding(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    OutlinedTextField(
-                        value = startStr,
-                        onValueChange = { startStr = it },
-                        label = { Text("وقت البداية") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                    DateTimePickerSection(
+                        label = if (itemToEdit.type == EntryType.HOURLY) "وقت البداية" else "تاريخ ووقت العملية",
+                        timestampMillis = startMillis,
+                        accentColor = primaryCustom,
+                        onTimestampChange = { startMillis = it }
                     )
+
                     if (itemToEdit.type == EntryType.HOURLY) {
-                        OutlinedTextField(
-                            value = endStr,
-                            onValueChange = { endStr = it },
-                            label = { Text("وقت النهاية") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp)
+                        DateTimePickerSection(
+                            label = "وقت النهاية",
+                            timestampMillis = endMillis,
+                            accentColor = primaryCustom,
+                            onTimestampChange = { endMillis = it }
                         )
                         OutlinedTextField(
                             value = breakStr,
                             onValueChange = { if (it.all { ch -> ch.isDigit() }) breakStr = it },
                             label = { Text("استراحة (دقائق)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp)
@@ -432,11 +837,13 @@ fun AppState.AppDialogs() {
             confirmButton = {
                 Button(
                     onClick = {
-                        val sMillis = runCatching { dfDateTime.parse(startStr.trim())?.time }.getOrNull() ?: itemToEdit.startTime
-                        val eMillis = if (itemToEdit.type == EntryType.HOURLY) runCatching { dfDateTime.parse(endStr.trim())?.time }.getOrNull() ?: itemToEdit.endTime else sMillis
                         val bMin = breakStr.toIntOrNull() ?: 0
                         val amt = amountStr.toDoubleOrNull() ?: kotlin.math.abs(itemToEdit.calculatedAmount)
-                        saveEditedEntry(itemToEdit, sMillis, eMillis ?: sMillis, bMin, amt, noteStr, false)
+                        if (itemToEdit.type == EntryType.HOURLY && endMillis <= startMillis) {
+                            showNotice("⚠️ وقت النهاية يجب أن يكون بعد وقت البداية!")
+                        } else {
+                            saveEditedEntry(itemToEdit, startMillis, if (itemToEdit.type == EntryType.HOURLY) endMillis else startMillis, bMin, amt, noteStr, false)
+                        }
                     },
                     shape = RoundedCornerShape(12.dp)
                 ) { Text("حفظ التعديلات") }
@@ -602,8 +1009,8 @@ fun AppState.AppDialogs() {
 
     // 13. Custom Period PDF Dialog
     if (showCustomPeriodPdfDialog) {
-        var startInput by rememberSaveable { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(System.currentTimeMillis() - 14 * 86400_000L))) }
-        var endInput by rememberSaveable { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
+        var startMillis by rememberSaveable { mutableLongStateOf(customReportStartMillis) }
+        var endMillis by rememberSaveable { mutableLongStateOf(customReportEndMillis) }
 
         AlertDialog(
             onDismissRequest = { showCustomPeriodPdfDialog = false },
@@ -614,36 +1021,36 @@ fun AppState.AppDialogs() {
                     modifier = Modifier.fillMaxWidth().imePadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    OutlinedTextField(
-                        value = startInput,
-                        onValueChange = { startInput = it },
-                        label = { Text("من تاريخ (yyyy-MM-dd)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                    DateOnlyPickerButton(
+                        label = "من تاريخ",
+                        dateMillis = startMillis,
+                        accentColor = primaryCustom,
+                        onDateChange = { startMillis = it }
                     )
-                    OutlinedTextField(
-                        value = endInput,
-                        onValueChange = { endInput = it },
-                        label = { Text("إلى تاريخ (yyyy-MM-dd)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                    DateOnlyPickerButton(
+                        label = "إلى تاريخ",
+                        dateMillis = endMillis,
+                        accentColor = primaryCustom,
+                        onDateChange = { endMillis = it }
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val sMillis = ElamalUtils.parseStrictDate(startInput)
-                        val eMillis = ElamalUtils.parseStrictDate(endInput)?.plus(86399_000L)
-                        if (sMillis != null && eMillis != null && eMillis >= sMillis) {
-                            customReportStartMillis = sMillis
-                            customReportEndMillis = eMillis
+                        val endOfDayMillis = Calendar.getInstance().apply {
+                            timeInMillis = endMillis
+                            set(Calendar.HOUR_OF_DAY, 23)
+                            set(Calendar.MINUTE, 59)
+                            set(Calendar.SECOND, 59)
+                        }.timeInMillis
+                        if (endOfDayMillis >= startMillis) {
+                            customReportStartMillis = startMillis
+                            customReportEndMillis = endOfDayMillis
                             selectedReportScope = 5
                             showCustomPeriodPdfDialog = false
                         } else {
-                            showNotice("⚠️ صيغة التاريخ غير صالحة؛ استخدم yyyy-MM-dd")
+                            showNotice("⚠️ تاريخ النهاية يجب أن يكون بعد أو يساوي تاريخ البداية")
                         }
                     },
                     shape = RoundedCornerShape(12.dp)
