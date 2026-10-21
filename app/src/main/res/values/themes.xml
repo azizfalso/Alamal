@@ -1,8 +1,7 @@
 <resources>
-    <style name="Theme.Elamal" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:statusBarColor">#0F172A</item>
+    <style name="Theme.Elamal" parent="android:Theme.DeviceDefault.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#090E1A</item>
+        <item name="android:navigationBarColor">#090E1A</item>
+        <item name="android:windowBackground">@android:color/black</item>
     </style>
 </resources>
-
-
-
