@@ -7,6 +7,9 @@ import android.graphics.*
 import android.graphics.pdf.PdfDocument
 import android.os.Handler
 import android.os.Looper
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.nanomks.elamal.data.EntryType
@@ -19,6 +22,20 @@ import java.util.*
 
 object PdfReportGenerator {
 
+    fun cleanupCachedReports(context: Context, maxAgeMillis: Long = 10 * 60_000L) {
+        runCatching {
+            val reportsDir = File(context.cacheDir, "reports")
+            if (reportsDir.exists()) {
+                val now = System.currentTimeMillis()
+                reportsDir.listFiles()?.forEach { file ->
+                    if (now - file.lastModified() >= maxAgeMillis) {
+                        file.delete()
+                    }
+                }
+            }
+        }
+    }
+
     fun generateAndSharePdf(
         context: Context,
         reportTitle: String,
@@ -27,6 +44,8 @@ object PdfReportGenerator {
         isDarkMode: Boolean
     ) {
         try {
+            cleanupCachedReports(context, maxAgeMillis = 5 * 60_000L)
+
             val doc = PdfDocument()
             val pageWidth = 595
             val pageHeight = 842
@@ -38,6 +57,12 @@ object PdfReportGenerator {
             val headerBg = if (isDarkMode) Color.parseColor("#1E293B") else Color.parseColor("#F1F5F9")
 
             val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            val noteTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = textColor
+                textSize = 9.5f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            }
+
             val dfDateTime = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
             val dfDate = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
@@ -58,20 +83,19 @@ object PdfReportGenerator {
                 }
             }
 
-            val chunks = if (entries.isEmpty()) listOf(emptyList()) else entries.chunked(20)
+            val chunks = if (entries.isEmpty()) listOf(emptyList()) else entries.chunked(16)
 
             chunks.forEachIndexed { pageIndex, pageEntries ->
                 val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex + 1).create()
                 val page = doc.startPage(pageInfo)
                 val canvas = page.canvas
 
-                // Explicitly paint full opaque background rect so PDF viewers know the exact page surface
                 paint.style = Paint.Style.FILL
                 paint.color = bgColor
                 canvas.drawRect(0f, 0f, pageWidth.toFloat(), pageHeight.toFloat(), paint)
 
                 paint.color = textColor
-                paint.textSize = 18f
+                paint.textSize = 17f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 paint.textAlign = Paint.Align.RIGHT
                 canvas.drawText(
@@ -121,24 +145,25 @@ object PdfReportGenerator {
 
                 val leftX = 36f
                 val rightX = pageWidth - 36f
-                val rowH = 26f
+                val baseRowH = 26f
                 val col1 = rightX - 95f
                 val col2 = col1 - 80f
                 val col3 = col2 - 95f
                 val col4 = col3 - 150f
+                val noteColWidth = (col3 - col4 - 14f).toInt().coerceAtLeast(60)
 
                 // Table Header
                 paint.style = Paint.Style.FILL
                 paint.color = headerBg
-                canvas.drawRect(leftX, y, rightX, y + rowH, paint)
+                canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
                 paint.color = gridColor
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 1f
-                canvas.drawRect(leftX, y, rightX, y + rowH, paint)
-                canvas.drawLine(col1, y, col1, y + rowH, paint)
-                canvas.drawLine(col2, y, col2, y + rowH, paint)
-                canvas.drawLine(col3, y, col3, y + rowH, paint)
-                canvas.drawLine(col4, y, col4, y + rowH, paint)
+                canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
+                canvas.drawLine(col1, y, col1, y + baseRowH, paint)
+                canvas.drawLine(col2, y, col2, y + baseRowH, paint)
+                canvas.drawLine(col3, y, col3, y + baseRowH, paint)
+                canvas.drawLine(col4, y, col4, y + baseRowH, paint)
 
                 paint.style = Paint.Style.FILL
                 paint.color = textColor
@@ -148,9 +173,18 @@ object PdfReportGenerator {
                 canvas.drawText("المدة", col2 - 8f, y + 17f, paint)
                 canvas.drawText("الملاحظة", col3 - 8f, y + 17f, paint)
                 canvas.drawText("الأجرة", col4 - 8f, y + 17f, paint)
-                y += rowH
+                y += baseRowH
 
                 for (e in pageEntries) {
+                    val cleanNote = e.note.replace("\n", " ").trim()
+                    val noteLayout = StaticLayout.Builder
+                        .obtain(cleanNote, 0, cleanNote.length, noteTextPaint, noteColWidth)
+                        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                        .setMaxLines(2)
+                        .build()
+
+                    val rowH = maxOf(baseRowH, noteLayout.height + 10f)
+
                     paint.style = Paint.Style.STROKE
                     paint.color = gridColor
                     canvas.drawRect(leftX, y, rightX, y + rowH, paint)
@@ -162,6 +196,7 @@ object PdfReportGenerator {
                     paint.style = Paint.Style.FILL
                     paint.color = textColor
                     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                    paint.textSize = 10f
                     canvas.drawText(dfDate.format(Date(e.startTime)), rightX - 8f, y + 17f, paint)
 
                     val badgeBg = when (e.type) {
@@ -175,20 +210,25 @@ object PdfReportGenerator {
                         EntryType.CREDIT -> "كريدي"
                     }
                     paint.color = badgeBg
-                    canvas.drawRoundRect(RectF(col2 + 8f, y + 4f, col1 - 8f, y + rowH - 4f), 6f, 6f, paint)
+                    canvas.drawRoundRect(RectF(col2 + 8f, y + 4f, col1 - 8f, y + 22f), 6f, 6f, paint)
                     paint.color = Color.WHITE
                     paint.textSize = 10f
                     canvas.drawText(badgeTxt, col1 - 14f, y + 17f, paint)
 
                     paint.color = textColor
-                    paint.textSize = 10f
                     val durStr = if (e.type == EntryType.HOURLY && e.endTime != null) {
                         val mins = ((e.endTime - e.startTime) / 60000L) - e.breakMinutes
                         ElamalUtils.formatDurationArabic(mins)
                     } else "-"
                     canvas.drawText(durStr, col2 - 8f, y + 17f, paint)
 
-                    canvas.drawText(e.note.replace("\n", " ").take(22), col3 - 8f, y + 17f, paint)
+                    // Multi-line wrapped note inside cell boundaries (#29)
+                    if (cleanNote.isNotEmpty()) {
+                        canvas.save()
+                        canvas.translate(col4 + 7f, y + 5f)
+                        noteLayout.draw(canvas)
+                        canvas.restore()
+                    }
 
                     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                     paint.color = if (e.calculatedAmount < 0) Color.parseColor("#DC2626") else textColor
@@ -200,10 +240,10 @@ object PdfReportGenerator {
                 if (pageIndex == chunks.lastIndex) {
                     paint.style = Paint.Style.FILL
                     paint.color = headerBg
-                    canvas.drawRect(leftX, y, rightX, y + rowH, paint)
+                    canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
                     paint.style = Paint.Style.STROKE
                     paint.color = gridColor
-                    canvas.drawRect(leftX, y, rightX, y + rowH, paint)
+                    canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
 
                     paint.style = Paint.Style.FILL
                     paint.color = textColor
@@ -218,7 +258,7 @@ object PdfReportGenerator {
                 paint.textSize = 10f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
                 canvas.drawText(
-                    "تطبيق «العمل» (com.nanomks.elamal v4.3) • نسق التقرير: ${if (isDarkMode) "داكن" else "فاتح للطباعة"} • ${dfDateTime.format(Date())}",
+                    "تطبيق «العمل» (com.nanomks.elamal v4.5) • نسق التقرير: ${if (isDarkMode) "داكن" else "فاتح للطباعة"} • ${dfDateTime.format(Date())}",
                     rightX,
                     pageHeight - 28f,
                     paint
@@ -228,7 +268,6 @@ object PdfReportGenerator {
             }
 
             val reportsDir = File(context.cacheDir, "reports").apply { mkdirs() }
-            reportsDir.listFiles()?.forEach { if (System.currentTimeMillis() - it.lastModified() > 3600_000L) it.delete() }
             val pdfFile = File(reportsDir, "Elamal_Report_${System.currentTimeMillis()}.pdf")
             FileOutputStream(pdfFile).use { doc.writeTo(it) }
             doc.close()
@@ -253,6 +292,7 @@ object PdfReportGenerator {
 
     fun exportAndShareCsv(context: Context, entries: List<WorkEntry>) {
         try {
+            cleanupCachedReports(context, maxAgeMillis = 5 * 60_000L)
             val reportsDir = File(context.cacheDir, "reports").apply { mkdirs() }
             val csvFile = File(reportsDir, "Elamal_Export_${System.currentTimeMillis()}.csv")
             val df = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
