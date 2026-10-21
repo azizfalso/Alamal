@@ -12,8 +12,8 @@ android {
         applicationId = "com.nanomks.elamal"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "4.2.0"
+        versionCode = 7
+        versionName = "4.5.0"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -34,7 +34,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             val ksFile = System.getenv("KEYSTORE_FILE")
             if (!ksFile.isNullOrEmpty() && file(ksFile).exists()) {
                 signingConfig = signingConfigs.getByName("release")
@@ -43,10 +44,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-        }
-        debug {
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
         }
     }
 
@@ -90,6 +87,3 @@ dependencies {
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 }
-
-
-
