@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,19 +70,21 @@ private fun HeroMiniStatPill(
 @Composable
 fun AppState.LedgerTab() {
     val lastCarryOver = settlements.firstOrNull()?.nextCarryOver ?: 0.0
-    val activeSum = entries.sumOf { it.calculatedAmount }
-    val totalNet = activeSum + lastCarryOver
-    val totalMinutesActive = entries.filter { it.type == EntryType.HOURLY && it.endTime != null }
-        .sumOf { (((it.endTime!! - it.startTime) / 60000L) - it.breakMinutes).coerceAtLeast(0) }
 
+    val (activeSum, totalMinutesActive, activeHourlySum, activeRemoteSum, activeCreditSum) = remember(entries) {
+        val sum = ElamalUtils.roundMoney(entries.sumOf { it.calculatedAmount })
+        val mins = entries.filter { it.type == EntryType.HOURLY && it.endTime != null }
+            .sumOf { (((it.endTime!! - it.startTime) / 60000L) - it.breakMinutes).coerceAtLeast(0) }
+        val hSum = ElamalUtils.roundMoney(entries.filter { it.type == EntryType.HOURLY }.sumOf { it.calculatedAmount })
+        val rSum = ElamalUtils.roundMoney(entries.filter { it.type == EntryType.REMOTE }.sumOf { it.calculatedAmount })
+        val cSum = ElamalUtils.roundMoney(kotlin.math.abs(entries.filter { it.type == EntryType.CREDIT }.sumOf { it.calculatedAmount }))
+         quintuple(sum, mins, hSum, rSum, cSum)
+    }
+
+    val totalNet = ElamalUtils.roundMoney(activeSum + lastCarryOver)
     val elapsedActiveMin = if (activeClockIn > 0L) ((nowMillis - activeClockIn) / 60000L).coerceAtLeast(0L) else 0L
     val liveEarnedNow = if (activeClockIn > 0L) ElamalUtils.calculateHourlyPay(activeClockIn, nowMillis, 0, hourlyRate) else 0.0
 
-    val activeHourlySum = entries.filter { it.type == EntryType.HOURLY }.sumOf { it.calculatedAmount }
-    val activeRemoteSum = entries.filter { it.type == EntryType.REMOTE }.sumOf { it.calculatedAmount }
-    val activeCreditSum = kotlin.math.abs(entries.filter { it.type == EntryType.CREDIT }.sumOf { it.calculatedAmount })
-
-    // Hero Financial Dashboard Card (Compact & Never Wraps Vertically!)
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
@@ -142,7 +145,7 @@ fun AppState.LedgerTab() {
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                    Icon(Icons.Default.Edit, contentDescription = "تعديل وقت البداية", tint = Color.White, modifier = Modifier.size(12.dp))
                                     Text("تعديل البداية", color = Color.White, fontSize = 10.5f.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                                 }
                             }
@@ -198,7 +201,6 @@ fun AppState.LedgerTab() {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Clean 2x2 Grid for Breakdown Pills (Never wraps vertically or squishes text!)
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -241,7 +243,6 @@ fun AppState.LedgerTab() {
 
     Spacer(modifier = Modifier.height(10.dp))
 
-    // Main Action Buttons
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -262,7 +263,7 @@ fun AppState.LedgerTab() {
         ) {
             Icon(
                 if (activeClockIn == 0L) Icons.Default.PlayArrow else Icons.Default.Stop,
-                contentDescription = null,
+                contentDescription = if (activeClockIn == 0L) "تسجيل دخول" else "تسجيل خروج",
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
@@ -295,7 +296,7 @@ fun AppState.LedgerTab() {
                 contentColor = if (isDark) Color(0xFF93C5FD) else Color(0xFF1E40AF)
             )
         ) {
-            Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(15.dp))
+            Icon(Icons.Default.Computer, contentDescription = "عمل عن بعد", modifier = Modifier.size(15.dp))
             Spacer(modifier = Modifier.width(4.dp))
             Text(
                 "عن بعد",
@@ -328,7 +329,6 @@ fun AppState.LedgerTab() {
         }
     }
 
-    // Wi-Fi Sessions Pending Review Card
     if (wifiSessions.isNotEmpty()) {
         Spacer(modifier = Modifier.height(10.dp))
         OutlinedCard(
@@ -344,7 +344,7 @@ fun AppState.LedgerTab() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(Icons.Default.Wifi, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Wifi, contentDescription = "واي فاي العمل", tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp))
                         Text(
                             "فترات واي فاي المقترحة (${pendingWifiList.size})",
                             fontWeight = FontWeight.Bold,
@@ -366,7 +366,9 @@ fun AppState.LedgerTab() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text(ws.ssid, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(ws.ssid, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
                             val durMin = ((ws.endTime - ws.startTime) / 60000L).coerceAtLeast(1L)
                             Text("المدة المرصودة: ${ElamalUtils.formatDurationArabic(durMin)}", fontSize = 12.sp, color = colorScheme.onSurfaceVariant)
                         }
@@ -410,11 +412,11 @@ fun AppState.LedgerTab() {
             value = searchQuery,
             onValueChange = { searchQuery = it },
             placeholder = { Text("ابحث في الملاحظات...", fontSize = 13.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث", modifier = Modifier.size(20.dp)) },
             trailingIcon = {
                 if (searchQuery.isNotBlank()) {
                     IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Clear, contentDescription = null)
+                        Icon(Icons.Default.Clear, contentDescription = "مسح البحث")
                     }
                 }
             },
@@ -422,9 +424,13 @@ fun AppState.LedgerTab() {
             singleLine = true,
             shape = RoundedCornerShape(14.dp)
         )
-        val cntHourly = entries.count { it.type == EntryType.HOURLY }
-        val cntRemote = entries.count { it.type == EntryType.REMOTE }
-        val cntCredit = entries.count { it.type == EntryType.CREDIT }
+        val (cntHourly, cntRemote, cntCredit) = remember(entries) {
+            Triple(
+                entries.count { it.type == EntryType.HOURLY },
+                entries.count { it.type == EntryType.REMOTE },
+                entries.count { it.type == EntryType.CREDIT }
+            )
+        }
 
         Row(
             modifier = Modifier
@@ -441,15 +447,17 @@ fun AppState.LedgerTab() {
         Spacer(modifier = Modifier.height(8.dp))
     }
 
-    val filtered = entries.filter {
-        (!searchFilterEnabled || filterType == null || it.type == filterType) &&
-                (!searchFilterEnabled || searchQuery.isBlank() || it.note.contains(searchQuery, ignoreCase = true))
+    val filtered = remember(entries, searchFilterEnabled, filterType, searchQuery) {
+        entries.filter {
+            (!searchFilterEnabled || filterType == null || it.type == filterType) &&
+                    (!searchFilterEnabled || searchQuery.isBlank() || it.note.contains(searchQuery, ignoreCase = true))
+        }
     }
 
     if (filtered.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.EventNote, contentDescription = null, modifier = Modifier.size(56.dp), tint = colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
+                Icon(Icons.Default.EventNote, contentDescription = "الدفتر فارغ", modifier = Modifier.size(56.dp), tint = colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("لا توجد سجلات عمل مطابقة في الدفتر حالياً", fontWeight = FontWeight.Bold, color = colorScheme.onSurfaceVariant)
                 Text("اضغط على «تسجيل دخول» أو أيقونة الساعات اليدوية للبدء", fontSize = 12.sp, color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
@@ -466,9 +474,12 @@ fun AppState.LedgerTab() {
                     item = item,
                     fontScale = fontScale,
                     onEdit = { editingEntry = item },
-                    onDelete = { softDeleteEntry(item) }
+                    onDelete = { requestDeleteEntry(item) }
                 )
             }
         }
     }
 }
+
+private data class Quintuple<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
+private fun <A, B, C, D, E> quintuple(a: A, b: B, c: C, d: D, e: E) = Quintuple(a, b, c, d, e)
