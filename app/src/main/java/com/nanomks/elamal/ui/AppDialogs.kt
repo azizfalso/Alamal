@@ -17,18 +17,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewModelScope
 import com.nanomks.elamal.data.EntryType
 import com.nanomks.elamal.data.WorkEntry
 import com.nanomks.elamal.util.ElamalSecurity
 import com.nanomks.elamal.util.ElamalUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -89,7 +91,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 2. Edit Active Clock-In Start Dialog (#4)
+    // 2. Edit Active Clock-In Start Dialog
     if (showEditActiveClockInDialog) {
         var startStr by rememberSaveable(activeClockIn) { mutableStateOf(dfDateTime.format(Date(activeClockIn))) }
         AlertDialog(
@@ -375,7 +377,7 @@ fun AppState.AppDialogs() {
         AlertDialog(
             onDismissRequest = { editingEntry = null },
             shape = RoundedCornerShape(22.dp),
-            title = { Text("تعديل السجل #${itemToEdit.id}", fontWeight = FontWeight.Bold) },
+            title = { Text("تعديل السجل #${ElamalUtils.localizeDigits("${itemToEdit.id}")}", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth().imePadding(),
@@ -465,7 +467,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 9. Trash Bin Dialog (#42)
+    // 9. Trash Bin Dialog
     if (showTrashBinDialog) {
         AlertDialog(
             onDismissRequest = { showTrashBinDialog = false },
@@ -558,7 +560,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 11. Restore Backup Confirmation Dialog (#3)
+    // 11. Restore Backup Confirmation Dialog
     val restoreFile = confirmRestoreFileName
     if (restoreFile != null) {
         AlertDialog(
