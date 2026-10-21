@@ -77,7 +77,7 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float = 1.0f, onEdit: () -> Unit, o
                         .background(badgeColor.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(badgeIcon, contentDescription = null, tint = badgeColor, modifier = Modifier.size(22.dp))
+                    Icon(badgeIcon, contentDescription = badgeLabel, tint = badgeColor, modifier = Modifier.size(22.dp))
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -108,18 +108,30 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float = 1.0f, onEdit: () -> Unit, o
                         }
                     }
 
-                    val timeInfo = if (item.type == EntryType.HOURLY && item.endTime != null) {
-                        val brkTxt = if (item.breakMinutes > 0) " • استراحة ${item.breakMinutes}د" else ""
-                        "${dfDate.format(Date(item.startTime))} (${dfTime.format(Date(item.startTime))} ← ${dfTime.format(Date(item.endTime))})$brkTxt"
-                    } else {
-                        "${dfDate.format(Date(item.startTime))} • ${dfTime.format(Date(item.startTime))}"
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            val ltrTimeRange = if (item.type == EntryType.HOURLY && item.endTime != null) {
+                                "${dfDate.format(Date(item.startTime))} (${dfTime.format(Date(item.startTime))} → ${dfTime.format(Date(item.endTime))})"
+                            } else {
+                                "${dfDate.format(Date(item.startTime))} • ${dfTime.format(Date(item.startTime))}"
+                            }
+                            Text(
+                                text = ltrTimeRange,
+                                fontSize = 11.5f.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (item.type == EntryType.HOURLY && item.breakMinutes > 0) {
+                            Text(
+                                text = "• استراحة ${item.breakMinutes}د",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-
-                    Text(
-                        text = timeInfo,
-                        fontSize = 11.5f.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
 
                     if (item.note.isNotBlank()) {
                         Text(
@@ -144,7 +156,7 @@ fun EntryRowCard(item: WorkEntry, fontScale: Float = 1.0f, onEdit: () -> Unit, o
                 IconButton(onClick = onDelete) {
                     Icon(
                         Icons.Default.DeleteOutline,
-                        contentDescription = "حذف",
+                        contentDescription = "حذف السجل",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
