@@ -119,7 +119,7 @@ fun AppState.SettlementsTab() {
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(onClick = {
-                                    exportPdfReportAsync("دفعة ${df.format(Date(s.timestamp))}", sEntries, listOf(s))
+                                    exportPdfReportAsync("دفعة ${df.format(Date(s.timestamp))}", sEntries, listOf(s), s.previousCarryOver)
                                 }) {
                                     Icon(Icons.Default.PictureAsPdf, contentDescription = "تصدير PDF للدفعة", tint = primaryCustom)
                                 }
