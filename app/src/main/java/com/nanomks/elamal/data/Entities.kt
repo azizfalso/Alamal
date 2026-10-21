@@ -20,7 +20,8 @@ data class WorkEntry(
     val note: String = "",
     val settlementId: Long? = null,
     val isDeleted: Boolean = false,
-    val eventUuid: String? = null
+    val eventUuid: String? = null,
+    val deletedAt: Long? = null
 )
 
 @Entity(tableName = "settlements")
@@ -43,6 +44,3 @@ data class WifiSession(
     val status: String = "PENDING", // PENDING, ADDED, IGNORED
     val isOpen: Boolean = false
 )
-
-
-
