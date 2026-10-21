@@ -2,7 +2,7 @@ package com.nanomks.elamal.ui
 
 import android.content.Intent
 import android.os.Build
-import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -83,7 +83,11 @@ fun AppState.RootContent(activity: FragmentActivity) {
         )
     }
 
-    // Sync both Status Bar and Navigation Bar with Dark/Light Mode
+    // Back navigation handler (#21): return to Ledger tab first before closing app
+    BackHandler(enabled = isUnlocked && currentTab != 0) {
+        currentTab = 0
+    }
+
     LaunchedEffect(isDark, primaryCustom, colorScheme.surface) {
         val window = activity.window
         window.statusBarColor = if (isDark) Color(0xFF090E1A).toArgb() else primaryCustom.toArgb()
@@ -102,25 +106,16 @@ fun AppState.RootContent(activity: FragmentActivity) {
             prefs.edit().putString("backup_uri", uri.toString()).putBoolean("first_run_done", true).apply()
             backupUriStr = uri.toString()
             firstRunDone = true
-            Toast.makeText(context, "تم ربط مجلد النسخ الاحتياطي بنجاح ✓", Toast.LENGTH_SHORT).show()
+            showNotice("تم ربط مجلد النسخ الاحتياطي بنجاح ✓")
         }
     }
 
-    val activeEntriesState by dao.getActiveEntries().collectAsState(initial = emptyList())
-    val allEntriesState by dao.getAllNonDeletedEntriesFlow().collectAsState(initial = emptyList())
-    val settlementsState by dao.getAllSettlements().collectAsState(initial = emptyList())
-    val wifiSessionsState by dao.getVisibleWifiSessions().collectAsState(initial = emptyList())
-
-    LaunchedEffect(activeEntriesState) { entries = activeEntriesState }
-    LaunchedEffect(allEntriesState) { allEntries = allEntriesState }
-    LaunchedEffect(settlementsState) { settlements = settlementsState }
-    LaunchedEffect(wifiSessionsState) { wifiSessions = wifiSessionsState }
-
-    // One-time startup sync (Widget queue + soft-delete cleanup + ongoing notification check)
+    // One-time startup sync: only purge soft-deleted entries older than 7 days (#1)
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             ElamalUtils.processPendingWidgetEventsOnAppOpen(context, dao)
-            dao.purgeSoftDeletedEntries()
+            val sevenDaysAgo = System.currentTimeMillis() - 7 * 86400_000L
+            dao.purgeOldSoftDeletedEntries(sevenDaysAgo)
             if (rootWifiEnabled && workSsids.isNotBlank() && ElamalUtils.isWifiConnectedFast(context)) {
                 detectedRootSsid = ElamalUtils.pollAndMergeRootWifi(context, dao)
             }
@@ -132,7 +127,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
         }
     }
 
-    // Battery-friendly UI minute ticker: ONLY ticks when screen is RESUMED in foreground AND a session is active!
+    // Battery-friendly UI minute ticker
     LaunchedEffect(lifecycleOwner, activeClockIn) {
         if (activeClockIn <= 0L) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -161,6 +156,17 @@ fun AppState.RootContent(activity: FragmentActivity) {
 
             Scaffold(
                 containerColor = colorScheme.background,
+                snackbarHost = {
+                    SnackbarHost(hostState = snackbarHostState) { data ->
+                        Snackbar(
+                            snackbarData = data,
+                            containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFF0F172A),
+                            contentColor = Color.White,
+                            actionColor = Color(0xFF34D399),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+                },
                 topBar = {
                     TopAppBar(
                         colors = TopAppBarDefaults.topAppBarColors(
@@ -172,7 +178,6 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                // Gradient Phone + DH Emblem in TopAppBar
                                 Box(
                                     modifier = Modifier
                                         .size(42.dp)
@@ -186,7 +191,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                 ) {
                                     Icon(
                                         Icons.Default.Smartphone,
-                                        contentDescription = null,
+                                        contentDescription = "شعار العمل",
                                         tint = Color.White.copy(alpha = 0.28f),
                                         modifier = Modifier.size(32.dp)
                                     )
@@ -208,7 +213,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                             shape = RoundedCornerShape(6.dp)
                                         ) {
                                             Text(
-                                                text = "v4.4",
+                                                text = "v4.5",
                                                 fontSize = 10.sp,
                                                 color = primaryCustom,
                                                 fontWeight = FontWeight.Bold,
@@ -220,7 +225,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                         Text(
                                             statusBanner,
                                             fontSize = 11.sp,
-                                            color = primaryCustom,
+                                            color = if (statusBanner.startsWith("⚠️") || statusBanner.startsWith("❌")) Color(0xFFEF4444) else primaryCustom,
                                             maxLines = 1
                                         )
                                     }
@@ -228,15 +233,15 @@ fun AppState.RootContent(activity: FragmentActivity) {
                             }
                         },
                         actions = {
-                            if (lastDeletedEntry != null) {
+                            if (deletedEntries.isNotEmpty()) {
                                 FilledTonalButton(
                                     onClick = { undoLastDelete() },
                                     modifier = Modifier.padding(end = 8.dp),
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    Icon(Icons.Default.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Undo, contentDescription = "تراجع عن الحذف", modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("تراجع عن الحذف", fontSize = 12.sp)
+                                    Text("تراجع (${deletedEntries.size})", fontSize = 12.sp)
                                 }
                             }
                         }
@@ -258,7 +263,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                         }
                                     }
                                 ) {
-                                    Icon(Icons.Default.AccessTime, contentDescription = null)
+                                    Icon(Icons.Default.AccessTime, contentDescription = "تبويب الدفتر")
                                 }
                             },
                             label = {
@@ -271,7 +276,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                         NavigationBarItem(
                             selected = currentTab == 1,
                             onClick = { currentTab = 1 },
-                            icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = null) },
+                            icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = "تبويب الدفعات") },
                             label = {
                                 Text(
                                     "الدفعات",
@@ -282,7 +287,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                         NavigationBarItem(
                             selected = currentTab == 2,
                             onClick = { currentTab = 2 },
-                            icon = { Icon(Icons.Default.Assessment, contentDescription = null) },
+                            icon = { Icon(Icons.Default.Assessment, contentDescription = "تبويب التقارير") },
                             label = {
                                 Text(
                                     "التقارير",
@@ -293,7 +298,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                         NavigationBarItem(
                             selected = currentTab == 3,
                             onClick = { currentTab = 3 },
-                            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                            icon = { Icon(Icons.Default.Settings, contentDescription = "تبويب الإعدادات") },
                             label = {
                                 Text(
                                     "الإعدادات",
@@ -320,7 +325,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                 0 -> LedgerTab()
                                 1 -> SettlementsTab()
                                 2 -> ReportsTab()
-                                3 -> SettingsTab()
+                                3 -> SettingsTab(activity = activity)
                             }
                         }
                     }
