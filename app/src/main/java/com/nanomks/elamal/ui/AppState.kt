@@ -27,15 +27,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
-/**
- * Clean ViewModel managing all UI states and executing all database/backup operations off the UI code.
- */
 class AppState(private val app: Application) : AndroidViewModel(app) {
 
     val prefs: SharedPreferences = app.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
     val dao: ElamalDao = ElamalDatabase.getInstance(app).dao()
 
-    var sysDark: Boolean = false
+    var sysDark by mutableStateOf(false)
     var themeMode by mutableIntStateOf(prefs.getInt("theme_mode", 0))
     val isDark: Boolean
         get() = when (themeMode) {
@@ -44,7 +41,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             else -> sysDark
         }
 
-    // Explicit PDF theme toggle (defaults to false = Light/Printable mode so PDFs aren't unexpectedly dark)
     var pdfDarkMode by mutableStateOf(prefs.getBoolean("pdf_dark_mode", false))
 
     var dynamicColor by mutableStateOf(prefs.getBoolean("dynamic_color", false))
@@ -76,10 +72,10 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var colorScheme: ColorScheme = lightColorScheme()
     lateinit var folderPicker: ManagedActivityResultLauncher<Uri?, Uri?>
 
-    var entries: List<WorkEntry> = emptyList()
-    var allEntries: List<WorkEntry> = emptyList()
-    var settlements: List<Settlement> = emptyList()
-    var wifiSessions: List<WifiSession> = emptyList()
+    var entries by mutableStateOf<List<WorkEntry>>(emptyList())
+    var allEntries by mutableStateOf<List<WorkEntry>>(emptyList())
+    var settlements by mutableStateOf<List<Settlement>>(emptyList())
+    var wifiSessions by mutableStateOf<List<WifiSession>>(emptyList())
     val pendingWifiList: List<WifiSession>
         get() = wifiSessions.filter { it.status == "PENDING" }
 
@@ -89,12 +85,12 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var lastDeletedEntry by mutableStateOf<WorkEntry?>(null)
     var statusBanner by mutableStateOf("")
 
-    // Reports Tab interactive scope selector (0=Active Summary, 1=Week, 2=Month, 3=Latest Settlement, 4=Full Archive, 5=Custom Range)
     var selectedReportScope by mutableIntStateOf(0)
     var customReportStartMillis by mutableLongStateOf(System.currentTimeMillis() - 14 * 86400_000L)
     var customReportEndMillis by mutableLongStateOf(System.currentTimeMillis())
 
     var showClockOutDialog by mutableStateOf(false)
+    var showEditActiveClockInDialog by mutableStateOf(false)
     var showManualHourlyDialog by mutableStateOf(false)
     var showRemoteDialog by mutableStateOf(false)
     var showCreditDialog by mutableStateOf(false)
@@ -139,7 +135,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             prefs.edit().putString("active_icon_alias", matchedAlias).apply()
             ElamalUtils.applyLauncherAlias(app, matchedAlias)
         }
-        // When disabled, we intentionally keep activeIconAlias at its last value!
     }
 
     fun setLauncherIconManually(aliasName: String) {
@@ -172,10 +167,21 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         val now = System.currentTimeMillis()
         prefs.edit().putLong("active_clock_in", now).apply()
         activeClockIn = now
+        nowMillis = now
         ElamalUtils.scheduleForgotClockOutAlarm(app, now)
         ElamalUtils.showOrUpdateOngoingWorkNotification(app, now, hourlyRate)
         ElamalWidgetReceiver.refreshAllWidgets(app)
         Toast.makeText(app, "بدأ حساب ساعات العمل ✓", Toast.LENGTH_SHORT).show()
+    }
+
+    fun updateActiveClockInStart(newStartMillis: Long) {
+        prefs.edit().putLong("active_clock_in", newStartMillis).apply()
+        activeClockIn = newStartMillis
+        nowMillis = System.currentTimeMillis()
+        ElamalUtils.scheduleForgotClockOutAlarm(app, newStartMillis)
+        ElamalUtils.showOrUpdateOngoingWorkNotification(app, newStartMillis, hourlyRate)
+        ElamalWidgetReceiver.refreshAllWidgets(app)
+        Toast.makeText(app, "تم تحديث وقت بداية الجلسة الجارية ✓", Toast.LENGTH_SHORT).show()
     }
 
     fun completeClockOut(breakMin: Int, note: String) {
