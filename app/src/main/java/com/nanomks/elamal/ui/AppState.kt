@@ -4,9 +4,10 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
@@ -24,6 +25,9 @@ import com.nanomks.elamal.util.ElamalUtils
 import com.nanomks.elamal.util.PdfReportGenerator
 import com.nanomks.elamal.widget.ElamalWidgetReceiver
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -31,6 +35,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
 
     val prefs: SharedPreferences = app.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
     val dao: ElamalDao = ElamalDatabase.getInstance(app).dao()
+    val snackbarHostState = SnackbarHostState()
 
     var sysDark by mutableStateOf(false)
     var themeMode by mutableIntStateOf(prefs.getInt("theme_mode", 0))
@@ -42,7 +47,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         }
 
     var pdfDarkMode by mutableStateOf(prefs.getBoolean("pdf_dark_mode", false))
-
     var dynamicColor by mutableStateOf(prefs.getBoolean("dynamic_color", false))
     var appColorHex by mutableStateOf(prefs.getString("app_color_hex", "#059669") ?: "#059669")
     var syncIconWithColor by mutableStateOf(prefs.getBoolean("sync_icon_with_color", true))
@@ -67,22 +71,30 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var isUnlocked by mutableStateOf(savedPin.isBlank())
     var failedPinAttempts by mutableIntStateOf(prefs.getInt("failed_pin_attempts", 0))
     var lockoutUntil by mutableLongStateOf(prefs.getLong("lockout_until", 0L))
+    var flagSecureEnabled by mutableStateOf(prefs.getBoolean("flag_secure_enabled", savedPin.isNotBlank()))
 
     var primaryCustom: Color = Color(0xFF059669)
     var colorScheme: ColorScheme = lightColorScheme()
     lateinit var folderPicker: ManagedActivityResultLauncher<Uri?, Uri?>
 
+    // Single-source Flow state collected once in ViewModel (#26 & #39)
     var entries by mutableStateOf<List<WorkEntry>>(emptyList())
+        private set
     var allEntries by mutableStateOf<List<WorkEntry>>(emptyList())
+        private set
+    var deletedEntries by mutableStateOf<List<WorkEntry>>(emptyList())
+        private set
     var settlements by mutableStateOf<List<Settlement>>(emptyList())
+        private set
     var wifiSessions by mutableStateOf<List<WifiSession>>(emptyList())
+        private set
+
     val pendingWifiList: List<WifiSession>
         get() = wifiSessions.filter { it.status == "PENDING" }
 
     var currentTab by mutableIntStateOf(0)
     var searchQuery by mutableStateOf("")
     var filterType by mutableStateOf<EntryType?>(null)
-    var lastDeletedEntry by mutableStateOf<WorkEntry?>(null)
     var statusBanner by mutableStateOf("")
 
     var selectedReportScope by mutableIntStateOf(0)
@@ -98,8 +110,11 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var showCustomPeriodPdfDialog by mutableStateOf(false)
     var showCustomColorPickerDialog by mutableStateOf(false)
     var showPinSetupDialog by mutableStateOf(false)
+
     var editingEntry by mutableStateOf<WorkEntry?>(null)
+    var pendingDeleteEntry by mutableStateOf<WorkEntry?>(null)
     var editingSettlement by mutableStateOf<Settlement?>(null)
+    var confirmUndoLatestSettlement by mutableStateOf(false)
     var confirmIgnoreAllWifi by mutableStateOf(false)
     var confirmRestoreFileName by mutableStateOf<String?>(null)
 
@@ -113,6 +128,55 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
 
     var nowMillis by mutableLongStateOf(System.currentTimeMillis())
     var detectedRootSsid by mutableStateOf<String?>(null)
+
+    private var autoBackupJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            dao.getActiveEntries().collectLatest { entries = it }
+        }
+        viewModelScope.launch {
+            dao.getAllNonDeletedEntriesFlow().collectLatest { allEntries = it }
+        }
+        viewModelScope.launch {
+            dao.getDeletedEntriesFlow().collectLatest { deletedEntries = it }
+        }
+        viewModelScope.launch {
+            dao.getAllSettlements().collectLatest { settlements = it }
+        }
+        viewModelScope.launch {
+            dao.getVisibleWifiSessions().collectLatest { wifiSessions = it }
+        }
+    }
+
+    fun showNotice(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
+        viewModelScope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val result = snackbarHostState.showSnackbar(
+                message = message,
+                actionLabel = actionLabel,
+                withDismissAction = true
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                onAction?.invoke()
+            }
+        }
+    }
+
+    /**
+     * Coalesces rapid database edits into a single background backup after 3.5 seconds (#12 & #36).
+     */
+    fun scheduleSmartBackupDebounced() {
+        autoBackupJob?.cancel()
+        autoBackupJob = viewModelScope.launch {
+            delay(3_500L)
+            val msg = BackupSafManager.performSmartBackup(app, dao, isManual = false)
+            statusBanner = msg
+            if (msg.startsWith("⚠️") || msg.startsWith("❌")) {
+                showNotice(msg)
+            }
+        }
+    }
 
     fun updateAppColor(newHex: String) {
         val cleanHex = if (newHex.startsWith("#")) newHex.uppercase() else "#${newHex.uppercase()}"
@@ -135,12 +199,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             prefs.edit().putString("active_icon_alias", matchedAlias).apply()
             ElamalUtils.applyLauncherAlias(app, matchedAlias)
         }
-    }
-
-    fun setLauncherIconManually(aliasName: String) {
-        activeIconAlias = aliasName
-        prefs.edit().putString("active_icon_alias", aliasName).apply()
-        ElamalUtils.applyLauncherAlias(app, aliasName)
     }
 
     fun refreshPrefsState() {
@@ -171,7 +229,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         ElamalUtils.scheduleForgotClockOutAlarm(app, now)
         ElamalUtils.showOrUpdateOngoingWorkNotification(app, now, hourlyRate)
         ElamalWidgetReceiver.refreshAllWidgets(app)
-        Toast.makeText(app, "بدأ حساب ساعات العمل ✓", Toast.LENGTH_SHORT).show()
+        showNotice("بدأ حساب ساعات العمل ✓")
     }
 
     fun updateActiveClockInStart(newStartMillis: Long) {
@@ -181,7 +239,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         ElamalUtils.scheduleForgotClockOutAlarm(app, newStartMillis)
         ElamalUtils.showOrUpdateOngoingWorkNotification(app, newStartMillis, hourlyRate)
         ElamalWidgetReceiver.refreshAllWidgets(app)
-        Toast.makeText(app, "تم تحديث وقت بداية الجلسة الجارية ✓", Toast.LENGTH_SHORT).show()
+        showNotice("تم تحديث وقت بداية الجلسة الجارية ✓")
     }
 
     fun completeClockOut(breakMin: Int, note: String) {
@@ -206,8 +264,9 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             ElamalUtils.cancelForgotClockOutAlarm(app)
             ElamalUtils.cancelOngoingWorkNotification(app)
             ElamalWidgetReceiver.refreshAllWidgets(app)
-            statusBanner = BackupSafManager.performSmartBackup(app, dao)
             showClockOutDialog = false
+            showNotice("تم حفظ جلسة العمل بنجاح ✓")
+            scheduleSmartBackupDebounced()
         }
     }
 
@@ -233,8 +292,9 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
                     note = note
                 )
             )
-            statusBanner = BackupSafManager.performSmartBackup(app, dao)
             showManualHourlyDialog = false
+            showNotice("تمت إضافة سجل الساعات ✓")
+            scheduleSmartBackupDebounced()
         }
     }
 
@@ -260,7 +320,8 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
                 )
             )
             dao.updateWifiSession(ws.copy(status = "ADDED"))
-            statusBanner = BackupSafManager.performSmartBackup(app, dao)
+            showNotice("تم اعتماد فترة الواي فاي ✓")
+            scheduleSmartBackupDebounced()
         }
     }
 
@@ -274,10 +335,12 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             dao.ignoreAllPendingWifi()
             confirmIgnoreAllWifi = false
+            showNotice("تم تجاهل الفترات المقترحة")
         }
     }
 
     fun saveFixedEntry(type: EntryType, signedAmount: Double, note: String, customTimestamp: Long = System.currentTimeMillis()) {
+        val roundedAmount = ElamalUtils.roundMoney(signedAmount)
         viewModelScope.launch {
             dao.insertEntry(
                 WorkEntry(
@@ -285,13 +348,14 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
                     startTime = customTimestamp,
                     endTime = customTimestamp,
                     hourlyRateAtEntry = hourlyRate,
-                    calculatedAmount = signedAmount,
+                    calculatedAmount = roundedAmount,
                     note = note
                 )
             )
-            statusBanner = BackupSafManager.performSmartBackup(app, dao)
             showRemoteDialog = false
             showCreditDialog = false
+            showNotice("تمت إضافة السجل للدفتر ✓")
+            scheduleSmartBackupDebounced()
         }
     }
 
@@ -323,7 +387,8 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
                     note = newNote
                 )
             } else {
-                val signedAmt = if (target.type == EntryType.CREDIT) -rawAmount else rawAmount
+                val roundedRaw = ElamalUtils.roundMoney(rawAmount)
+                val signedAmt = if (target.type == EntryType.CREDIT) -roundedRaw else roundedRaw
                 target.copy(
                     startTime = newStart,
                     endTime = newStart,
@@ -335,72 +400,90 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             if (target.settlementId != null) {
                 dao.recalculateSettlementsCascade()
             }
-            statusBanner = BackupSafManager.performSmartBackup(app, dao)
             editingEntry = null
+            showNotice("تم حفظ التعديلات ✓")
+            scheduleSmartBackupDebounced()
         }
     }
 
-    fun softDeleteEntry(item: WorkEntry) {
-        lastDeletedEntry = item
+    fun requestDeleteEntry(item: WorkEntry) {
+        pendingDeleteEntry = item
+    }
+
+    fun confirmSoftDeleteEntry() {
+        val item = pendingDeleteEntry ?: return
+        pendingDeleteEntry = null
         viewModelScope.launch {
             dao.updateEntry(item.copy(isDeleted = true))
             if (item.settlementId != null) {
                 dao.recalculateSettlementsCascade()
             }
-            statusBanner = BackupSafManager.performSmartBackup(app, dao)
+            scheduleSmartBackupDebounced()
+            showNotice(
+                message = "تم نقل السجل إلى المحذوفات المؤقتة",
+                actionLabel = "تراجع",
+                onAction = { undoLastDelete() }
+            )
         }
     }
 
     fun undoLastDelete() {
-        val toRestore = lastDeletedEntry ?: return
+        val toRestore = deletedEntries.firstOrNull() ?: return
         viewModelScope.launch {
             dao.updateEntry(toRestore.copy(isDeleted = false))
             if (toRestore.settlementId != null) {
                 dao.recalculateSettlementsCascade()
             }
-            lastDeletedEntry = null
-            statusBanner = BackupSafManager.performSmartBackup(app, dao)
-            Toast.makeText(app, "تم التراجع عن الحذف ✓", Toast.LENGTH_SHORT).show()
+            scheduleSmartBackupDebounced()
+            showNotice("تم استرجاع السجل المحذوف ✓")
         }
     }
 
     fun createNewSettlement(entriesSum: Double, prevCarry: Double, paid: Double, note: String) {
-        val nextCarry = (entriesSum + prevCarry) - paid
+        val roundedEntriesSum = ElamalUtils.roundMoney(entriesSum)
+        val roundedPrevCarry = ElamalUtils.roundMoney(prevCarry)
+        val roundedPaid = ElamalUtils.roundMoney(paid)
+        val nextCarry = ElamalUtils.roundMoney((roundedEntriesSum + roundedPrevCarry) - roundedPaid)
+
         viewModelScope.launch {
             val sId = dao.insertSettlement(
                 Settlement(
                     timestamp = System.currentTimeMillis(),
-                    entriesTotal = entriesSum,
-                    previousCarryOver = prevCarry,
-                    amountPaid = paid,
+                    entriesTotal = roundedEntriesSum,
+                    previousCarryOver = roundedPrevCarry,
+                    amountPaid = roundedPaid,
                     nextCarryOver = nextCarry,
                     note = note
                 )
             )
             dao.attachEntriesToSettlement(sId)
             dao.recalculateSettlementsCascade()
-            statusBanner = BackupSafManager.performSmartBackup(app, dao)
             showSettleDialog = false
+            showNotice("تم استلام الدفعة وأرشفة السجلات ✓")
+            scheduleSmartBackupDebounced()
         }
     }
 
     fun saveEditedSettlement(target: Settlement, newTimestamp: Long, newPaid: Double, newNote: String) {
+        val roundedPaid = ElamalUtils.roundMoney(newPaid)
         viewModelScope.launch {
-            dao.updateSettlement(target.copy(timestamp = newTimestamp, amountPaid = newPaid, note = newNote))
+            dao.updateSettlement(target.copy(timestamp = newTimestamp, amountPaid = roundedPaid, note = newNote))
             dao.recalculateSettlementsCascade()
-            statusBanner = BackupSafManager.performSmartBackup(app, dao)
             editingSettlement = null
+            showNotice("تم تحديث الدفعة وإعادة حساب المرحّل ✓")
+            scheduleSmartBackupDebounced()
         }
     }
 
-    fun undoLatestSettlement() {
+    fun performConfirmedUndoLatestSettlement() {
         val latest = settlements.firstOrNull() ?: return
+        confirmUndoLatestSettlement = false
         viewModelScope.launch {
             dao.detachEntriesFromSettlement(latest.id)
             dao.deleteSettlement(latest)
             dao.recalculateSettlementsCascade()
-            statusBanner = BackupSafManager.performSmartBackup(app, dao)
-            Toast.makeText(app, "تم التراجع عن آخر دفعة وإعادة السجلات للدفتر ✓", Toast.LENGTH_SHORT).show()
+            showNotice("تم التراجع عن آخر دفعة وإعادة سجلاتها للدفتر ✓")
+            scheduleSmartBackupDebounced()
         }
     }
 
@@ -410,7 +493,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             refreshPrefsState()
             statusBanner = msg
             confirmRestoreFileName = null
-            Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
+            showNotice(msg)
         }
     }
 
