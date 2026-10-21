@@ -2,6 +2,7 @@ package com.nanomks.elamal.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -56,7 +57,7 @@ fun AppState.LedgerTab() {
                         colors = if (activeClockIn > 0L) {
                             listOf(Color(0xFF047857), Color(0xFF064E3B))
                         } else {
-                            listOf(primaryCustom, Color(0xFF0F172A))
+                            listOf(primaryCustom, if (isDark) Color(0xFF1E293B) else Color(0xFF0F172A))
                         }
                     )
                 )
@@ -81,23 +82,44 @@ fun AppState.LedgerTab() {
                             )
                         }
                         Text(
-                            text = if (activeClockIn > 0L) "جلسة عمل جارية الآن..." else "الصافي المستحق حالياً",
+                            text = if (activeClockIn > 0L) "جلسة جارية (بدأت ${ElamalUtils.formatTime(activeClockIn)})" else "الصافي المستحق حالياً",
                             color = Color.White.copy(alpha = 0.92f),
-                            fontSize = 13.5f.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
-                    Surface(
-                        color = Color.White.copy(alpha = 0.18f),
-                        shape = RoundedCornerShape(20.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = "⏱ ${ElamalUtils.formatDurationArabic(totalMinutesActive + elapsedActiveMin)}",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
-                        )
+                        if (activeClockIn > 0L) {
+                            Surface(
+                                color = Color.White.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.clickable { showEditActiveClockInDialog = true }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                    Text("تعديل البداية", color = Color.White, fontSize = 10.5f.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        Surface(
+                            color = Color.White.copy(alpha = 0.18f),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Text(
+                                text = "⏱ ${ElamalUtils.formatDurationArabic(totalMinutesActive + elapsedActiveMin)}",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
                     }
                 }
 
@@ -136,7 +158,6 @@ fun AppState.LedgerTab() {
                 HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Rich Mini Breakdown inside Hero Card
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -179,7 +200,7 @@ fun AppState.LedgerTab() {
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // Main Action Buttons (Fixed text clipping issue in Image 1!)
+    // Main Action Buttons (Dark-mode aware colors & no text clipping)
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -227,7 +248,11 @@ fun AppState.LedgerTab() {
                 .weight(0.95f)
                 .heightIn(min = 50.dp),
             shape = RoundedCornerShape(14.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = if (isDark) Color(0xFF1E3A8A).copy(alpha = 0.45f) else Color(0xFFDBEAFE),
+                contentColor = if (isDark) Color(0xFF93C5FD) else Color(0xFF1E40AF)
+            )
         ) {
             Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(15.dp))
             Spacer(modifier = Modifier.width(4.dp))
@@ -248,8 +273,8 @@ fun AppState.LedgerTab() {
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
             colors = ButtonDefaults.filledTonalButtonColors(
-                containerColor = Color(0xFFFEE2E2),
-                contentColor = Color(0xFF991B1B)
+                containerColor = if (isDark) Color(0xFF7F1D1D).copy(alpha = 0.45f) else Color(0xFFFEE2E2),
+                contentColor = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B)
             )
         ) {
             Text(
@@ -305,8 +330,17 @@ fun AppState.LedgerTab() {
                             Text("المدة المرصودة: ${ElamalUtils.formatDurationArabic(durMin)}", fontSize = 12.sp, color = colorScheme.onSurfaceVariant)
                         }
                         if (ws.status == "ADDED") {
-                            Surface(color = Color(0xFFD1FAE5), shape = RoundedCornerShape(8.dp)) {
-                                Text("أُضيفت ✓", color = Color(0xFF065F46), fontSize = 11.5f.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            Surface(
+                                color = if (isDark) Color(0xFF064E3B) else Color(0xFFD1FAE5),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    "أُضيفت ✓",
+                                    color = if (isDark) Color(0xFF6EE7B7) else Color(0xFF065F46),
+                                    fontSize = 11.5f.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
                             }
                         } else {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
