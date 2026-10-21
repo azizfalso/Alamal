@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,40 +28,70 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.viewModelScope
 import com.nanomks.elamal.util.ElamalSecurity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun AppState.LockScreen(activity: FragmentActivity) {
     val context = LocalContext.current
-    var pinInput by remember { mutableStateOf("") }
-    var pinError by remember { mutableStateOf("") }
+    var pinInput by rememberSaveable { mutableStateOf("") }
+    var pinError by rememberSaveable { mutableStateOf("") }
+    var isVerifying by remember { mutableStateOf(false) }
+
+    val expectedPinLength = remember(savedPin) {
+        ElamalSecurity.getStoredPinLengthHint(prefs)
+    }
 
     fun attemptUnlock(candidatePin: String, isAutoCheck: Boolean = false) {
+        if (isVerifying) return
+        // Avoid running heavy PBKDF2 on intermediate digits when we know the exact PIN length (#38)
+        if (isAutoCheck && expectedPinLength in 4..8 && candidatePin.length != expectedPinLength) {
+            return
+        }
+
         val now = System.currentTimeMillis()
         if (now < lockoutUntil) {
             val remSec = ((lockoutUntil - now) / 1000L).coerceAtLeast(1L)
             pinError = "تم تجاوز 7 محاولات! انتظر $remSec ثانية."
             return
         }
-        if (ElamalSecurity.verifyPin(candidatePin, savedPin)) {
-            if (!savedPin.startsWith("PBKDF2_V1:")) {
-                val hashed = ElamalSecurity.hashPinPbkdf2(candidatePin)
-                savedPin = hashed
-                prefs.edit().putString("security_pin", hashed).apply()
+
+        isVerifying = true
+        viewModelScope.launch {
+            val matched = withContext(Dispatchers.Default) {
+                ElamalSecurity.verifyPin(candidatePin, savedPin)
             }
-            failedPinAttempts = 0
-            prefs.edit().putInt("failed_pin_attempts", 0).apply()
-            isUnlocked = true
-        } else if (!isAutoCheck) {
-            failedPinAttempts += 1
-            prefs.edit().putInt("failed_pin_attempts", failedPinAttempts).apply()
-            pinInput = ""
-            if (failedPinAttempts >= 7) {
-                lockoutUntil = now + 30_000L
-                prefs.edit().putLong("lockout_until", lockoutUntil).apply()
-                pinError = "7 محاولات خاطئة! تم تأخير الفتح 30 ثانية."
-            } else {
-                pinError = "رمز القفل غير صحيح ($failedPinAttempts / 7)"
+            isVerifying = false
+            if (matched) {
+                if (!savedPin.startsWith("PBKDF2_V1:")) {
+                    val hashed = withContext(Dispatchers.Default) {
+                        ElamalSecurity.hashPinPbkdf2(candidatePin)
+                    }
+                    savedPin = hashed
+                    prefs.edit()
+                        .putString("security_pin", hashed)
+                        .putInt("security_pin_length", candidatePin.length)
+                        .apply()
+                } else if (expectedPinLength == 0) {
+                    prefs.edit().putInt("security_pin_length", candidatePin.length).apply()
+                }
+                failedPinAttempts = 0
+                prefs.edit().putInt("failed_pin_attempts", 0).apply()
+                isUnlocked = true
+            } else if (!isAutoCheck || (expectedPinLength in 4..8 && candidatePin.length == expectedPinLength)) {
+                failedPinAttempts += 1
+                prefs.edit().putInt("failed_pin_attempts", failedPinAttempts).apply()
+                pinInput = ""
+                if (failedPinAttempts >= 7) {
+                    lockoutUntil = now + 30_000L
+                    prefs.edit().putLong("lockout_until", lockoutUntil).apply()
+                    pinError = "7 محاولات خاطئة! تم تأخير الفتح 30 ثانية."
+                } else {
+                    pinError = "رمز القفل غير صحيح ($failedPinAttempts / 7)"
+                }
             }
         }
     }
@@ -92,7 +123,6 @@ fun AppState.LockScreen(activity: FragmentActivity) {
         ) {
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Top Header & PIN Dots Indicator
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
                     modifier = Modifier
@@ -102,7 +132,7 @@ fun AppState.LockScreen(activity: FragmentActivity) {
                 ) {
                     Icon(
                         Icons.Default.Lock,
-                        contentDescription = null,
+                        contentDescription = "قفل الأمان",
                         modifier = Modifier.size(38.dp),
                         tint = primaryCustom
                     )
@@ -123,14 +153,13 @@ fun AppState.LockScreen(activity: FragmentActivity) {
 
                 Spacer(modifier = Modifier.height(26.dp))
 
-                // Interactive PIN Dots (LTR order so dots fill from left to right naturally)
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    val dotCount = maxOf(4, pinInput.length.coerceAtMost(8))
+                    val targetDots = if (expectedPinLength in 4..8) expectedPinLength else maxOf(4, pinInput.length.coerceAtMost(8))
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        for (i in 0 until dotCount) {
+                        for (i in 0 until targetDots) {
                             val isFilled = i < pinInput.length
                             val dotColor by animateColorAsState(
                                 targetValue = if (isFilled) primaryCustom else Color.Transparent,
@@ -168,7 +197,6 @@ fun AppState.LockScreen(activity: FragmentActivity) {
                 }
             }
 
-            // Custom Built-in Numeric Keypad (No System Keyboard!)
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -192,7 +220,7 @@ fun AppState.LockScreen(activity: FragmentActivity) {
                                     surfaceColor = colorScheme.surface,
                                     contentColor = colorScheme.onSurface,
                                     onClick = {
-                                        if (pinInput.length < 8) {
+                                        if (pinInput.length < 8 && !isVerifying) {
                                             pinError = ""
                                             val updated = pinInput + digit
                                             pinInput = updated
@@ -206,12 +234,10 @@ fun AppState.LockScreen(activity: FragmentActivity) {
                         }
                     }
 
-                    // Bottom Row: Biometric | 0 | Backspace
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(24.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Biometric Button
                         Box(
                             modifier = Modifier
                                 .size(72.dp)
@@ -222,19 +248,18 @@ fun AppState.LockScreen(activity: FragmentActivity) {
                         ) {
                             Icon(
                                 Icons.Default.Fingerprint,
-                                contentDescription = "البصمة",
+                                contentDescription = "فتح بالبصمة",
                                 tint = primaryCustom,
                                 modifier = Modifier.size(32.dp)
                             )
                         }
 
-                        // Digit 0
                         PinPadButton(
                             label = "0",
                             surfaceColor = colorScheme.surface,
                             contentColor = colorScheme.onSurface,
                             onClick = {
-                                if (pinInput.length < 8) {
+                                if (pinInput.length < 8 && !isVerifying) {
                                     pinError = ""
                                     val updated = pinInput + "0"
                                     pinInput = updated
@@ -245,14 +270,13 @@ fun AppState.LockScreen(activity: FragmentActivity) {
                             }
                         )
 
-                        // Backspace Button
                         Box(
                             modifier = Modifier
                                 .size(72.dp)
                                 .clip(CircleShape)
                                 .background(colorScheme.surfaceVariant)
                                 .clickable {
-                                    if (pinInput.isNotEmpty()) {
+                                    if (pinInput.isNotEmpty() && !isVerifying) {
                                         pinInput = pinInput.dropLast(1)
                                         pinError = ""
                                     }
@@ -261,7 +285,7 @@ fun AppState.LockScreen(activity: FragmentActivity) {
                         ) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Backspace,
-                                contentDescription = "مسح",
+                                contentDescription = "مسح رقم",
                                 tint = colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(26.dp)
                             )
@@ -270,17 +294,16 @@ fun AppState.LockScreen(activity: FragmentActivity) {
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Explicit Confirm Button (in case user enters wrong PIN and wants feedback)
                     Button(
                         onClick = { attemptUnlock(pinInput, isAutoCheck = false) },
-                        enabled = pinInput.length >= 4,
+                        enabled = pinInput.length >= 4 && !isVerifying,
                         modifier = Modifier
                             .fillMaxWidth(0.75f)
                             .height(50.dp),
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = primaryCustom)
                     ) {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Check, contentDescription = "تأكيد الرمز", modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("فتح القفل", fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
