@@ -11,6 +11,9 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.wifi.WifiInfo
+import android.net.wifi.WifiManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.nanomks.elamal.MainActivity
 import com.nanomks.elamal.data.ElamalDao
@@ -32,6 +35,12 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.pow
 
 object ElamalUtils {
+
+    @Volatile
+    private var lastRootPollMillis: Long = 0L
+
+    @Volatile
+    private var lastDetectedSsidCache: String? = null
 
     private val LAUNCHER_ALIASES = listOf(
         "com.nanomks.elamal.LauncherDefault" to "#059669",
@@ -86,11 +95,15 @@ object ElamalUtils {
         }
     }
 
+    fun roundMoney(value: Double): Double {
+        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toDouble()
+    }
+
     fun calculateHourlyPay(startMillis: Long, endMillis: Long, breakMinutes: Int, hourlyRate: Double): Double {
         val totalMinutes = ((endMillis - startMillis) / 60000L) - breakMinutes
         if (totalMinutes <= 0) return 0.0
         val raw = (totalMinutes.toDouble() / 60.0) * hourlyRate
-        return BigDecimal.valueOf(raw).setScale(2, RoundingMode.HALF_UP).toDouble()
+        return roundMoney(raw)
     }
 
     fun formatDurationArabic(minutesTotal: Long): String {
@@ -124,18 +137,6 @@ object ElamalUtils {
         return if (d != null && pos.index == trimmed.length) d.time else null
     }
 
-    fun parseStrictDateTime(input: String): Long? {
-        val trimmed = input.trim()
-        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).apply { isLenient = false }
-        val pos = ParsePosition(0)
-        val d = sdf.parse(trimmed, pos)
-        return if (d != null && pos.index == trimmed.length) d.time else null
-    }
-
-    /**
-     * Zero-cost pre-check: checks if the device currently has an active Wi-Fi transport
-     * without spawning any root shell process.
-     */
     fun isWifiConnectedFast(context: Context): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
         val activeNet = cm.activeNetwork ?: return false
@@ -144,14 +145,48 @@ object ElamalUtils {
     }
 
     /**
-     * Lightweight Root Wi-Fi SSID reader:
-     * Uses fast `cmd wifi status` and `iw dev wlan0 link` first.
-     * Avoids heavy `dumpsys wifi` unless needed.
+     * Tries non-root standard Android APIs first (zero battery cost).
+     * Falls back to root `su` ONLY if standard APIs return `<unknown ssid>` AND cooldown has passed.
      */
-    fun getConnectedSsidViaRoot(context: Context? = null): String? {
+    @Suppress("DEPRECATION")
+    private fun getStandardWifiSsidOrNull(context: Context): String? {
+        return runCatching {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val net = cm?.activeNetwork
+            val caps = net?.let { cm.getNetworkCapabilities(it) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val info = caps?.transportInfo as? WifiInfo
+                val raw = info?.ssid?.removeSurrounding("\"")?.trim()
+                if (!raw.isNullOrBlank() && raw != "<unknown ssid>" && raw != "0x") return raw
+            }
+            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            val rawLegacy = wm?.connectionInfo?.ssid?.removeSurrounding("\"")?.trim()
+            if (!rawLegacy.isNullOrBlank() && rawLegacy != "<unknown ssid>" && rawLegacy != "0x") rawLegacy else null
+        }.getOrNull()
+    }
+
+    fun getConnectedSsidViaRoot(context: Context? = null, forceFresh: Boolean = false): String? {
         if (context != null && !isWifiConnectedFast(context)) {
+            lastDetectedSsidCache = null
             return null
         }
+
+        // 1. Try standard zero-cost Android WifiInfo first (#13 & #35)
+        if (context != null) {
+            val stdSsid = getStandardWifiSsidOrNull(context)
+            if (stdSsid != null) {
+                lastDetectedSsidCache = stdSsid
+                return stdSsid
+            }
+        }
+
+        // 2. Throttle `su` invocations: if called within 8 seconds and not forced, reuse cached SSID
+        val now = System.currentTimeMillis()
+        if (!forceFresh && now - lastRootPollMillis < 8_000L) {
+            return lastDetectedSsidCache
+        }
+        lastRootPollMillis = now
+
         var process: Process? = null
         return try {
             process = Runtime.getRuntime().exec("su")
@@ -161,26 +196,32 @@ object ElamalUtils {
             os.writeBytes("exit\n")
             os.flush()
 
-            val finished = process.waitFor(3, TimeUnit.SECONDS)
+            val finished = process.waitFor(2, TimeUnit.SECONDS)
             if (!finished) {
                 process.destroyForcibly()
-                return null
+                return lastDetectedSsidCache
             }
 
             val output = BufferedReader(InputStreamReader(process.inputStream)).readText()
 
             val p1 = Regex("""SSID:\s*"([^"]+)"""")
             p1.find(output)?.groupValues?.getOrNull(1)?.let {
-                if (it.isNotBlank() && it != "<unknown ssid>" && it != "0x") return it.trim()
+                if (it.isNotBlank() && it != "<unknown ssid>" && it != "0x") {
+                    val clean = it.trim()
+                    lastDetectedSsidCache = clean
+                    return clean
+                }
             }
 
             val p2 = Regex("""SSID:\s*([^,\n"]+)""")
             p2.find(output)?.groupValues?.getOrNull(1)?.let {
                 val cleaned = it.trim()
                 if (cleaned.isNotBlank() && cleaned != "<unknown ssid>" && cleaned != "null" && cleaned != "0x") {
+                    lastDetectedSsidCache = cleaned
                     return cleaned
                 }
             }
+            lastDetectedSsidCache = null
             null
         } catch (e: Exception) {
             process?.destroyForcibly()
@@ -188,7 +229,7 @@ object ElamalUtils {
         }
     }
 
-    suspend fun pollAndMergeRootWifi(context: Context, dao: ElamalDao): String? {
+    suspend fun pollAndMergeRootWifi(context: Context, dao: ElamalDao, forceFresh: Boolean = false): String? {
         val prefs = context.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
         if (!prefs.getBoolean("root_wifi_enabled", true)) return null
 
@@ -198,7 +239,9 @@ object ElamalUtils {
             .filter { it.isNotEmpty() }
             .take(6)
 
-        val currentSsid = getConnectedSsidViaRoot(context)
+        if (configuredList.isEmpty() && !forceFresh) return null
+
+        val currentSsid = getConnectedSsidViaRoot(context, forceFresh = forceFresh)
         if (configuredList.isEmpty()) return currentSsid
 
         val now = System.currentTimeMillis()
@@ -441,4 +484,4 @@ object ElamalUtils {
         sb.append("💰 *الصافي المستحق:* *${formatMoney(totalNet)}*")
         return sb.toString()
     }
-                           }
+}
