@@ -14,6 +14,7 @@ import org.json.JSONObject
 object BackupSafManager {
 
     private val backupMutex = Mutex()
+    private const val MAX_MANUAL_BACKUPS_TO_KEEP = 10
 
     suspend fun performSmartBackup(
         context: Context,
@@ -28,7 +29,6 @@ object BackupSafManager {
             val treeUri = Uri.parse(uriStr)
             val dir = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext "تعذر الوصول إلى مجلد النسخ"
 
-            // Security check (#7): NEVER write unencrypted backup silently if encryption is enabled!
             val encEnabled = prefs.getBoolean("backup_encrypt_enabled", false)
             val encPass = ElamalSecurity.getBackupPassword(prefs)
             if (encEnabled) {
@@ -124,7 +124,6 @@ object BackupSafManager {
             }
             root.put("wifiSessions", wifiArr)
 
-            // Compact JSON without indentation to reduce file size & I/O cost
             val rawJson = root.toString()
             val finalPayload = if (encEnabled) {
                 ElamalSecurity.encryptBackup(rawJson, encPass)
@@ -141,12 +140,13 @@ object BackupSafManager {
             val writtenUri = writeToDocumentFileFast(context, dir, targetFileName, finalPayload)
                 ?: return@withContext "❌ فشل إنشاء أو تحديث ملف النسخة الاحتياطية"
 
-            // Verify only on manual backup to save battery and storage I/O on routine auto-backups
             if (isManual) {
                 val verifyRead = readUriText(context, writtenUri)
                 if (verifyRead != finalPayload) {
                     return@withContext "⚠️ تحذير: فشل التحقق من سلامة الملف بعد الكتابة!"
                 }
+                // Automatically clean up old manual backups beyond the latest 10 (#45)
+                pruneOldManualBackups(dir)
             }
 
             prefs.edit()
@@ -164,12 +164,31 @@ object BackupSafManager {
         }
     }
 
+    /**
+     * Deletes older `elamal_manual_<timestamp>.json` files, keeping only the newest [MAX_MANUAL_BACKUPS_TO_KEEP] (#45).
+     */
+    private fun pruneOldManualBackups(dir: DocumentFile) {
+        runCatching {
+            val manualFiles = dir.listFiles()
+                .filter { f ->
+                    val name = f.name ?: ""
+                    name.startsWith("elamal_manual_") && name.endsWith(".json")
+                }
+                .sortedByDescending { it.name ?: "" }
+
+            if (manualFiles.size > MAX_MANUAL_BACKUPS_TO_KEEP) {
+                manualFiles.drop(MAX_MANUAL_BACKUPS_TO_KEEP).forEach { oldFile ->
+                    runCatching { oldFile.delete() }
+                }
+            }
+        }
+    }
+
     suspend fun restoreFromBackup(
         context: Context,
         dao: ElamalDao,
         fileName: String = "elamal_auto_backup.json"
     ): String {
-        // 1. Check if current DB has data; if so, take a pre-restore backup and verify it succeeded!
         val currentEntriesCount = withContext(Dispatchers.IO) { dao.getAllEntriesSync().size }
         if (currentEntriesCount > 0) {
             val preBackupMsg = performSmartBackup(context, dao, isManual = true)
@@ -196,7 +215,6 @@ object BackupSafManager {
                     return@withContext "❌ فشل فك التشفير: ${e.message}"
                 }
 
-                // 2. Parse ALL JSON objects in memory FIRST before touching the database (#3)
                 try {
                     val root = JSONObject(jsonStr)
                     val parsedEntries = mutableListOf<WorkEntry>()
@@ -221,7 +239,8 @@ object BackupSafManager {
                                 note = o.optString("note", ""),
                                 settlementId = setId,
                                 isDeleted = false,
-                                eventUuid = uuid
+                                eventUuid = uuid,
+                                deletedAt = null
                             )
                         )
                     }
@@ -259,10 +278,8 @@ object BackupSafManager {
                         }
                     }
 
-                    // 3. Execute atomic Room @Transaction replacement (#3)
                     dao.restoreFullDatabaseAtomic(parsedEntries, parsedSettlements, parsedWifi)
 
-                    // 4. Safely restore preferences and validate activeClockIn (#4)
                     val editor = prefs.edit()
                     if (root.has("hourlyRate")) {
                         editor.putFloat("hourly_rate", root.getDouble("hourlyRate").toFloat())
@@ -276,7 +293,6 @@ object BackupSafManager {
 
                     val now = System.currentTimeMillis()
                     val rawClockIn = if (root.has("activeClockIn")) root.getLong("activeClockIn") else 0L
-                    // Ignore stale activeClockIn older than 20 hours or in the future (#4)
                     val validClockIn = if (rawClockIn in (now - 20 * 3600_000L)..now) rawClockIn else 0L
                     editor.putLong("active_clock_in", validClockIn)
                     editor.apply()
@@ -306,9 +322,14 @@ object BackupSafManager {
             .sortedDescending()
     }
 
-    /**
-     * Single-pass safe write to reduce storage I/O overhead (#12 & #36).
-     */
+    fun deleteBackupFile(context: Context, fileName: String): Boolean {
+        val prefs = context.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
+        val uriStr = prefs.getString("backup_uri", "") ?: return false
+        if (uriStr.isBlank()) return false
+        val dir = DocumentFile.fromTreeUri(context, Uri.parse(uriStr)) ?: return false
+        return dir.findFile(fileName)?.delete() == true
+    }
+
     private fun writeToDocumentFileFast(context: Context, dir: DocumentFile, name: String, content: String): Uri? {
         val bytes = content.toByteArray(Charsets.UTF_8)
         val targetDoc = dir.findFile(name) ?: dir.createFile("application/json", name) ?: return null
