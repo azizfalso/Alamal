@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,10 +28,10 @@ import java.util.*
 @Composable
 fun AppState.SettlementsTab() {
     val prevCarry = settlements.firstOrNull()?.nextCarryOver ?: 0.0
-    val entriesSum = entries.sumOf { it.calculatedAmount }
-    val netDue = entriesSum + prevCarry
+    val entriesSum = remember(entries) { ElamalUtils.roundMoney(entries.sumOf { it.calculatedAmount }) }
+    val netDue = ElamalUtils.roundMoney(entriesSum + prevCarry)
     val df = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US) }
-    var expandedSettlementId by remember { mutableStateOf<Long?>(null) }
+    var expandedSettlementId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -52,16 +53,16 @@ fun AppState.SettlementsTab() {
                     .heightIn(min = 48.dp),
                 shape = RoundedCornerShape(14.dp)
             ) {
-                Icon(Icons.Default.Payments, contentDescription = null)
+                Icon(Icons.Default.Payments, contentDescription = "استلام دفعة")
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("استلام دفعة جديدة وترحيل الفرق", fontWeight = FontWeight.Bold)
             }
             if (settlements.isNotEmpty()) {
                 TextButton(
-                    onClick = { undoLatestSettlement() },
+                    onClick = { confirmUndoLatestSettlement = true },
                     modifier = Modifier.align(Alignment.End)
                 ) {
-                    Icon(Icons.Default.Undo, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFFEF4444))
+                    Icon(Icons.Default.Undo, contentDescription = "التراجع عن آخر دفعة", modifier = Modifier.size(16.dp), tint = Color(0xFFEF4444))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("التراجع عن آخر دفعة", color = Color(0xFFEF4444), fontSize = 12.5f.sp)
                 }
@@ -76,19 +77,23 @@ fun AppState.SettlementsTab() {
     if (settlements.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(54.dp), tint = colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
+                Icon(Icons.Default.Inventory2, contentDescription = "الأرشيف فارغ", modifier = Modifier.size(54.dp), tint = colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("الأرشيف فارغ حالياً", fontWeight = FontWeight.Bold, color = colorScheme.onSurfaceVariant)
                 Text("عند استلام دفعة، ستنتقل سجلاتها إلى هنا مع حفظ الرصيد المرحّل", fontSize = 12.sp, color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f), textAlign = TextAlign.Center)
             }
         }
     } else {
+        val entriesBySettlement = remember(allEntries) {
+            allEntries.filter { it.settlementId != null }.groupBy { it.settlementId }
+        }
+
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 14.dp)
         ) {
             items(settlements, key = { it.id }) { s ->
-                val sEntries = allEntries.filter { it.settlementId == s.id }
+                val sEntries = entriesBySettlement[s.id] ?: emptyList()
                 val isExpanded = expandedSettlementId == s.id
 
                 OutlinedCard(
@@ -116,14 +121,14 @@ fun AppState.SettlementsTab() {
                                 IconButton(onClick = {
                                     exportPdfReportAsync("دفعة ${df.format(Date(s.timestamp))}", sEntries, listOf(s))
                                 }) {
-                                    Icon(Icons.Default.PictureAsPdf, contentDescription = "PDF", tint = primaryCustom)
+                                    Icon(Icons.Default.PictureAsPdf, contentDescription = "تصدير PDF للدفعة", tint = primaryCustom)
                                 }
                                 IconButton(onClick = { editingSettlement = s }) {
-                                    Icon(Icons.Default.Edit, contentDescription = "تعديل")
+                                    Icon(Icons.Default.Edit, contentDescription = "تعديل الدفعة")
                                 }
                                 Icon(
                                     if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                    contentDescription = null,
+                                    contentDescription = if (isExpanded) "طي التفاصيل" else "عرض التفاصيل",
                                     tint = colorScheme.onSurfaceVariant
                                 )
                             }
@@ -163,7 +168,7 @@ fun AppState.SettlementsTab() {
                                             item = item,
                                             fontScale = fontScale,
                                             onEdit = { editingEntry = item },
-                                            onDelete = { softDeleteEntry(item) }
+                                            onDelete = { requestDeleteEntry(item) }
                                         )
                                     }
                                 }
