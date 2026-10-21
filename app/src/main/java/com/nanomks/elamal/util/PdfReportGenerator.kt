@@ -22,20 +22,14 @@ import java.util.*
 
 object PdfReportGenerator {
 
-    private fun formatArabicDayAndDate(millis: Long): String {
-        val cal = Calendar.getInstance().apply { timeInMillis = millis }
-        val dayName = when (cal.get(Calendar.DAY_OF_WEEK)) {
-            Calendar.SUNDAY -> "الأحد"
-            Calendar.MONDAY -> "الإثنين"
-            Calendar.TUESDAY -> "الثلاثاء"
-            Calendar.WEDNESDAY -> "الأربعاء"
-            Calendar.THURSDAY -> "الخميس"
-            Calendar.FRIDAY -> "الجمعة"
-            Calendar.SATURDAY -> "السبت"
-            else -> ""
-        }
+    private fun formatArabicDayAndDatePdf(millis: Long): String {
+        val dayName = ElamalUtils.getArabicDayName(millis)
         val datePart = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
-        return "$dayName $datePart"
+        return "\u200F$dayName \u2066${ElamalUtils.localizeDigits(datePart)}\u2069"
+    }
+
+    private fun formatDurationPdfRtl(minutesTotal: Long): String {
+        return "\u200F" + ElamalUtils.formatDurationArabic(minutesTotal)
     }
 
     fun cleanupCachedReports(context: Context, maxAgeMillis: Long = 10 * 60_000L) {
@@ -157,7 +151,7 @@ object PdfReportGenerator {
                     paint.textSize = 11f
                     canvas.drawText("مجموع الساعات", c2Right - 12f, cardTop + 24f, paint)
                     paint.textSize = 15f
-                    canvas.drawText(ElamalUtils.formatDurationArabic(totalHourlyMinutes), c2Right - 12f, cardTop + 48f, paint)
+                    canvas.drawText(formatDurationPdfRtl(totalHourlyMinutes), c2Right - 12f, cardTop + 48f, paint)
 
                     // Card 3: Credit & Remote
                     val c3Right = c2Right - cardW - 14f
@@ -175,11 +169,10 @@ object PdfReportGenerator {
                 val leftX = 36f
                 val rightX = pageWidth - 36f
                 val baseRowH = 26f
-                // تم توسيع عمود التاريخ إلى 118f ليحتوي على (اليوم + التاريخ) بوضوح
                 val col1 = rightX - 118f
                 val col2 = col1 - 74f
-                val col3 = col2 - 88f
-                val col4 = col3 - 138f
+                val col3 = col2 - 92f
+                val col4 = col3 - 134f
                 val noteColWidth = (col3 - col4 - 14f).toInt().coerceAtLeast(60)
 
                 // Table Header
@@ -227,7 +220,7 @@ object PdfReportGenerator {
                     paint.color = textColor
                     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
                     paint.textSize = 9.5f
-                    canvas.drawText(formatArabicDayAndDate(e.startTime), rightX - 6f, y + 17f, paint)
+                    canvas.drawText(formatArabicDayAndDatePdf(e.startTime), rightX - 6f, y + 17f, paint)
 
                     val badgeBg = when (e.type) {
                         EntryType.HOURLY -> Color.parseColor("#059669")
@@ -246,10 +239,10 @@ object PdfReportGenerator {
                     canvas.drawText(badgeTxt, col1 - 12f, y + 17f, paint)
 
                     paint.color = textColor
-                    paint.textSize = 10f
+                    paint.textSize = 9.5f
                     val durStr = if (e.type == EntryType.HOURLY && e.endTime != null) {
                         val mins = ((e.endTime - e.startTime) / 60000L) - e.breakMinutes
-                        ElamalUtils.formatDurationArabic(mins)
+                        formatDurationPdfRtl(mins)
                     } else "-"
                     canvas.drawText(durStr, col2 - 8f, y + 17f, paint)
 
@@ -261,6 +254,7 @@ object PdfReportGenerator {
                     }
 
                     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    paint.textSize = 10f
                     paint.color = if (e.calculatedAmount < 0) Color.parseColor("#DC2626") else textColor
                     canvas.drawText(ElamalUtils.formatMoney(e.calculatedAmount), col4 - 8f, y + 17f, paint)
 
@@ -302,7 +296,7 @@ object PdfReportGenerator {
                     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                     paint.textSize = 11f
                     canvas.drawText("المجموع النهائي المستحق", rightX - 8f, y + 17f, paint)
-                    canvas.drawText(ElamalUtils.formatDurationArabic(totalHourlyMinutes), col2 - 8f, y + 17f, paint)
+                    canvas.drawText(formatDurationPdfRtl(totalHourlyMinutes), col2 - 8f, y + 17f, paint)
                     canvas.drawText(ElamalUtils.formatMoney(finalNetTotal), col4 - 8f, y + 17f, paint)
                 }
 
@@ -352,13 +346,14 @@ object PdfReportGenerator {
             FileOutputStream(csvFile).use { fos ->
                 fos.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
                 val sb = StringBuilder()
-                sb.append("المعرف,النوع,البداية,النهاية,الاستراحة(د),المدة,الأجرة(DH),الملاحظة\n")
+                sb.append("المعرف,النوع,اليوم,البداية,النهاية,الاستراحة(د),المدة,الأجرة(DH),الملاحظة\n")
                 for (e in entries) {
+                    val dayName = ElamalUtils.getArabicDayName(e.startTime)
                     val mins = if (e.endTime != null) ((e.endTime - e.startTime) / 60000L) - e.breakMinutes else 0L
                     val dur = if (e.type == EntryType.HOURLY) ElamalUtils.formatDurationArabic(mins) else "-"
                     val endStr = e.endTime?.let { df.format(Date(it)) } ?: ""
                     val escapedNote = "\"" + e.note.replace("\"", "\"\"").replace("\n", " ") + "\""
-                    sb.append("${e.id},${e.type},${df.format(Date(e.startTime))},$endStr,${e.breakMinutes},$dur,${e.calculatedAmount},$escapedNote\n")
+                    sb.append("${e.id},${e.type},$dayName,${df.format(Date(e.startTime))},$endStr,${e.breakMinutes},$dur,${e.calculatedAmount},$escapedNote\n")
                 }
                 fos.write(sb.toString().toByteArray(Charsets.UTF_8))
             }
