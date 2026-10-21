@@ -1,10 +1,8 @@
 package com.nanomks.elamal.ui
 
-import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -14,18 +12,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewModelScope
+import com.nanomks.elamal.MainActivity
 import com.nanomks.elamal.util.BackupSafManager
 import com.nanomks.elamal.util.ElamalSecurity
 import com.nanomks.elamal.util.ElamalUtils
@@ -51,7 +54,7 @@ private fun CategorySectionHeader(title: String, subtitle: String, icon: ImageVe
                 .background(accentColor.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = title, tint = accentColor, modifier = Modifier.size(20.dp))
         }
         Column {
             Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
@@ -62,28 +65,31 @@ private fun CategorySectionHeader(title: String, subtitle: String, icon: ImageVe
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun AppState.SettingsTab() {
+fun AppState.SettingsTab(activity: FragmentActivity? = null) {
     val context = LocalContext.current
     val lastBackupMillis = prefs.getLong("last_backup_time", 0L)
     val backupAgeHours = if (lastBackupMillis > 0L) (System.currentTimeMillis() - lastBackupMillis) / 3600_000L else -1L
     var backupFilesList by remember(statusBanner) { mutableStateOf(BackupSafManager.listAvailableBackups(context)) }
-    var encEnabled by remember { mutableStateOf(prefs.getBoolean("backup_encrypt_enabled", false)) }
-    var backupPass by remember { mutableStateOf(ElamalSecurity.getBackupPassword(prefs)) }
-    var newSsidInput by remember { mutableStateOf("") }
+    var encEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("backup_encrypt_enabled", false)) }
+    var backupPass by rememberSaveable { mutableStateOf(ElamalSecurity.getBackupPassword(prefs)) }
+    var keystoreError by remember(statusBanner, backupPass) { mutableStateOf(ElamalSecurity.hasKeystoreDecryptionError(prefs)) }
+    var newSsidInput by rememberSaveable { mutableStateOf("") }
 
-    var rateInput by remember(prefsRefreshCounter) {
+    var rateInput by rememberSaveable(prefsRefreshCounter) {
         val cleanStr = if (hourlyRate % 1.0 == 0.0) hourlyRate.toInt().toString() else hourlyRate.toString()
         mutableStateOf(cleanStr)
     }
 
-    val ssidList = workSsids.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    val ssidList = remember(workSsids) {
+        workSsids.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    }
 
     val mainColors = listOf(
         "#059669" to "زمردي",
         "#2563EB" to "ملكي",
         "#7C3AED" to "بنفسجي"
     )
-    
+
     val coldColors = listOf(
         "#0D9488" to "فيروزي بارد",
         "#0284C7" to "سماوي جليدي",
@@ -209,26 +215,26 @@ fun AppState.SettingsTab() {
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("مزامنة أيقونة التطبيق مع لون التطبيق", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text(
-                                        text = if (syncIconWithColor) "مفعّل: الأيقونة تتغير تلقائياً مع اللون المختار"
-                                        else "متوقف: الأيقونة محتفظة بآخر لون قبل الإيقاف",
-                                        fontSize = 11.sp,
-                                        color = colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Switch(
-                                    checked = syncIconWithColor,
-                                    onCheckedChange = { toggleSyncIconWithColor(it) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("مزامنة أيقونة التطبيق مع لون التطبيق", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(
+                                    text = if (syncIconWithColor) "مفعّل: الأيقونة تتغير تلقائياً مع اللون المختار"
+                                    else "متوقف: الأيقونة محتفظة بآخر لون قبل الإيقاف",
+                                    fontSize = 11.sp,
+                                    color = colorScheme.onSurfaceVariant
                                 )
                             }
+                            Switch(
+                                checked = syncIconWithColor,
+                                onCheckedChange = { toggleSyncIconWithColor(it) }
+                            )
                         }
                     }
 
@@ -343,7 +349,7 @@ fun AppState.SettingsTab() {
         }
 
         // =========================================================================
-        // CATEGORY 3: قسم التتبع الذكي بالواي فاي والودجت
+        // CATEGORY 3: قسم التتبع الذكي بالواي فاي والودجت (#18 LTR SSIDs)
         // =========================================================================
         item {
             OutlinedCard(
@@ -355,7 +361,7 @@ fun AppState.SettingsTab() {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     CategorySectionHeader(
                         title = "قسم التتبع الذكي والودجت",
-                        subtitle = "رصد شبكات العمل بالرووت وودجت الشاشة الرئيسية",
+                        subtitle = "رصد شبكات العمل بالنظام أو الرووت وودجت الشاشة الرئيسية",
                         icon = Icons.Default.Wifi,
                         accentColor = Color(0xFF2563EB)
                     )
@@ -367,7 +373,7 @@ fun AppState.SettingsTab() {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("تفعيل تتبع شبكات العمل بالرووت", fontWeight = FontWeight.Bold, fontSize = 13.5f.sp)
+                        Text("تفعيل تتبع شبكات العمل تلقائياً", fontWeight = FontWeight.Bold, fontSize = 13.5f.sp)
                         Switch(
                             checked = rootWifiEnabled,
                             onCheckedChange = {
@@ -379,32 +385,45 @@ fun AppState.SettingsTab() {
                     }
 
                     if (rootWifiEnabled) {
-                        Text(
-                            text = "الشبكة المقروءة الآن: ${detectedRootSsid ?: "اضغط فحص لطلب صلاحية الرووت (su)"}",
-                            fontSize = 12.5f.sp,
-                            color = if (detectedRootSsid != null) Color(0xFF059669) else colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "الشبكة المقروءة الآن:",
+                                fontSize = 12.5f.sp,
+                                color = colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = detectedRootSsid ?: "اضغط فحص لقراءة الـ SSID",
+                                    fontSize = 12.5f.sp,
+                                    color = if (detectedRootSsid != null) Color(0xFF059669) else colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = {
                                     viewModelScope.launch {
                                         val ssid = withContext(Dispatchers.IO) {
-                                            ElamalUtils.pollAndMergeRootWifi(context, dao)
+                                            ElamalUtils.pollAndMergeRootWifi(context, dao, forceFresh = true)
                                         }
                                         detectedRootSsid = ssid
                                         if (ssid != null) {
-                                            Toast.makeText(context, "تم قراءة الشبكة عبر الرووت: $ssid ✓", Toast.LENGTH_SHORT).show()
+                                            showNotice("تم قراءة الشبكة: $ssid ✓")
                                         } else {
-                                            Toast.makeText(context, "تأكد من منح صلاحية الرووت للتطبيق في Magisk/KernelSU", Toast.LENGTH_LONG).show()
+                                            showNotice("تعذر قراءة اسم الشبكة تلقائياً؛ يمكنك كتابة الـ SSID يدوياً بالأسفل")
                                         }
                                     }
                                 },
                                 modifier = Modifier.weight(1f).height(42.dp),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Text("فحص بالرووت الآن", fontSize = 12.sp)
+                                Text("فحص الشبكة الآن", fontSize = 12.sp)
                             }
 
                             OutlinedButton(
@@ -416,8 +435,9 @@ fun AppState.SettingsTab() {
                                         prefs.edit().putString("work_ssids", updated).apply()
                                         ElamalUtils.syncPeriodicWifiPollSchedule(context)
                                         viewModelScope.launch(Dispatchers.IO) { ElamalUtils.pollAndMergeRootWifi(context, dao) }
+                                        showNotice("تمت إضافة الشبكة $current ✓")
                                     } else {
-                                        Toast.makeText(context, "افحص الشبكة بالرووت أولاً أو أضف اسمها بالأسفل", Toast.LENGTH_SHORT).show()
+                                        showNotice("افحص الشبكة أولاً أو أضف اسمها بالأسفل")
                                     }
                                 },
                                 modifier = Modifier.weight(1f).height(42.dp),
@@ -442,8 +462,12 @@ fun AppState.SettingsTab() {
                                         prefs.edit().putString("work_ssids", updated).apply()
                                         ElamalUtils.syncPeriodicWifiPollSchedule(context)
                                     },
-                                    label = { Text(itemSsid) },
-                                    trailingIcon = { Icon(Icons.Default.Close, contentDescription = "حذف", modifier = Modifier.size(15.dp)) }
+                                    label = {
+                                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                            Text(itemSsid)
+                                        }
+                                    },
+                                    trailingIcon = { Icon(Icons.Default.Close, contentDescription = "حذف الشبكة", modifier = Modifier.size(15.dp)) }
                                 )
                             }
                         }
@@ -471,6 +495,7 @@ fun AppState.SettingsTab() {
                                             prefs.edit().putString("work_ssids", updated).apply()
                                             ElamalUtils.syncPeriodicWifiPollSchedule(context)
                                             newSsidInput = ""
+                                            showNotice("تمت إضافة $clean ✓")
                                         }
                                     },
                                     shape = RoundedCornerShape(12.dp)
@@ -501,7 +526,7 @@ fun AppState.SettingsTab() {
         }
 
         // =========================================================================
-        // CATEGORY 4: قسم الأمان وقفل التطبيق (PIN بدون كيبورد)
+        // CATEGORY 4: قسم الأمان والخصوصية (PIN + FLAG_SECURE #8)
         // =========================================================================
         item {
             OutlinedCard(
@@ -513,7 +538,7 @@ fun AppState.SettingsTab() {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     CategorySectionHeader(
                         title = "قسم الأمان والخصوصية",
-                        subtitle = "حماية التطبيق برمز PIN مدمج (PBKDF2) والبصمة",
+                        subtitle = "حماية التطبيق برمز PIN مدمج (PBKDF2)، البصمة، وحجب لقطات الشاشة",
                         icon = Icons.Default.Security,
                         accentColor = Color(0xFF7C3AED)
                     )
@@ -542,17 +567,36 @@ fun AppState.SettingsTab() {
                             onClick = { showPinSetupDialog = true },
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Icon(Icons.Default.Dialpad, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Dialpad, contentDescription = "إدارة الرمز", modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(if (savedPin.isBlank()) "تعيين رمز" else "إدارة الرمز", fontSize = 12.sp)
                         }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("حجب الأرقام في التطبيقات الأخيرة ولقطة الشاشة (FLAG_SECURE)", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("يمنع ظهور المبالغ في معاينة الشاشات المفتوحة بالخلفية", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = flagSecureEnabled,
+                            onCheckedChange = { enabled ->
+                                flagSecureEnabled = enabled
+                                prefs.edit().putBoolean("flag_secure_enabled", enabled).apply()
+                                (activity as? MainActivity)?.applyFlagSecureFromPrefs()
+                            }
+                        )
                     }
                 }
             }
         }
 
         // =========================================================================
-        // CATEGORY 5: قسم النسخ الاحتياطي الذكي والاستعادة (SAF & Keystore)
+        // CATEGORY 5: قسم النسخ الاحتياطي الذكي والاستعادة (SAF & Keystore #7)
         // =========================================================================
         item {
             OutlinedCard(
@@ -587,11 +631,28 @@ fun AppState.SettingsTab() {
                     }
 
                     if (encEnabled) {
+                        if (keystoreError) {
+                            Surface(
+                                color = Color(0xFFEF4444).copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    "⚠️ تعذر قراءة كلمة المرور من Keystore (ربما بعد تغيير قفل الهاتف). لن يتم حفظ نسخ غير مشفرة؛ أعد كتابة كلمة المرور أدناه.",
+                                    color = Color(0xFFEF4444),
+                                    fontSize = 11.5f.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
+
                         OutlinedTextField(
                             value = backupPass,
                             onValueChange = {
                                 backupPass = it
-                                ElamalSecurity.saveBackupPassword(prefs, it)
+                                val ok = ElamalSecurity.saveBackupPassword(prefs, it)
+                                keystoreError = !ok
                             },
                             label = { Text("كلمة مرور تشفير واستعادة النسخ (Keystore)") },
                             visualTransformation = PasswordVisualTransformation(),
@@ -614,7 +675,7 @@ fun AppState.SettingsTab() {
                         modifier = Modifier.fillMaxWidth().height(46.dp),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null)
+                        Icon(Icons.Default.FolderOpen, contentDescription = "اختيار مجلد النسخ")
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(if (backupUriStr.isBlank()) "اختيار مجلد النسخ الاحتياطي (SAF)" else "تغيير مجلد النسخ الاحتياطي ✓")
                     }
@@ -626,7 +687,7 @@ fun AppState.SettingsTab() {
                                     val msg = BackupSafManager.performSmartBackup(context, dao, isManual = true)
                                     statusBanner = msg
                                     backupFilesList = BackupSafManager.listAvailableBackups(context)
-                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    showNotice(msg)
                                 }
                             },
                             modifier = Modifier.weight(1f).height(44.dp),
@@ -658,7 +719,9 @@ fun AppState.SettingsTab() {
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(bf, fontSize = 11.5f.sp, fontWeight = FontWeight.Medium)
+                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                        Text(bf, fontSize = 11.5f.sp, fontWeight = FontWeight.Medium)
+                                    }
                                     TextButton(onClick = { confirmRestoreFileName = bf }) {
                                         Text("استعادة", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
