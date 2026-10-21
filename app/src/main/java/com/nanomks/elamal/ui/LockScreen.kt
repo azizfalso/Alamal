@@ -47,7 +47,6 @@ fun AppState.LockScreen(activity: FragmentActivity) {
 
     fun attemptUnlock(candidatePin: String, isAutoCheck: Boolean = false) {
         if (isVerifying) return
-        // Avoid running heavy PBKDF2 on intermediate digits when we know the exact PIN length (#38)
         if (isAutoCheck && expectedPinLength in 4..8 && candidatePin.length != expectedPinLength) {
             return
         }
@@ -66,7 +65,7 @@ fun AppState.LockScreen(activity: FragmentActivity) {
             }
             isVerifying = false
             if (matched) {
-                if (!savedPin.startsWith("PBKDF2_V1:")) {
+                if (!savedPin.startsWith("PBKDF2_V2:")) {
                     val hashed = withContext(Dispatchers.Default) {
                         ElamalSecurity.hashPinPbkdf2(candidatePin)
                     }

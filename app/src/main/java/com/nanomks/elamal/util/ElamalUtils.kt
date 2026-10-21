@@ -46,6 +46,12 @@ object ElamalUtils {
     @Volatile
     var useArabicDigits: Boolean = false
 
+    @Volatile
+    var currencySymbol: String = "DH"
+
+    private val ARABIC_DIACRITICS_REGEX = Regex("[\\u064B-\\u065F\\u0670\\u0640]")
+    private val ALEF_VARIANTS_REGEX = Regex("[أإآٱ]")
+
     private val LAUNCHER_ALIASES = listOf(
         "com.nanomks.elamal.LauncherDefault" to "#059669",
         "com.nanomks.elamal.LauncherAlt" to "#2563EB",
@@ -55,6 +61,33 @@ object ElamalUtils {
         "com.nanomks.elamal.LauncherIndigo" to "#4F46E5",
         "com.nanomks.elamal.LauncherSlate" to "#475569"
     )
+
+    /**
+     * Fast Arabic text normalization for search:
+     * Strips diacritics/tatweel, unifies Alef variants (أ/إ/آ/ٱ -> ا), Teh Marbuta (ة -> ه), and Alef Maksura (ى -> ي).
+     */
+    fun normalizeArabicSearch(text: String): String {
+        if (text.isBlank()) return ""
+        return text.lowercase(Locale.ROOT)
+            .replace(ARABIC_DIACRITICS_REGEX, "")
+            .replace(ALEF_VARIANTS_REGEX, "ا")
+            .replace('ى', 'ي')
+            .replace('ة', 'ه')
+            .trim()
+    }
+
+    /**
+     * Prevents CSV Formula Injection when opened in Excel/Sheets by prefixing dangerous leading characters.
+     */
+    fun sanitizeCsvCell(raw: String): String {
+        val clean = raw.replace("\n", " ").replace("\r", " ").trim()
+        val safe = if (clean.isNotEmpty() && clean[0] in charArrayOf('=', '+', '-', '@', '\t', '\r') && clean.toDoubleOrNull() == null) {
+            "'$clean"
+        } else {
+            clean
+        }
+        return "\"" + safe.replace("\"", "\"\"") + "\""
+    }
 
     fun localizeDigits(input: String): String {
         if (!useArabicDigits) return input
@@ -134,7 +167,8 @@ object ElamalUtils {
     }
 
     fun formatMoney(amount: Double): String {
-        val raw = String.format(Locale.US, "%.2f DH", amount)
+        val cur = currencySymbol.trim().let { if (it.isEmpty()) "" else " $it" }
+        val raw = String.format(Locale.US, "%.2f%s", amount, cur)
         return localizeDigits(raw)
     }
 
@@ -171,6 +205,34 @@ object ElamalUtils {
     fun formatDateTime(millis: Long): String {
         val raw = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(millis))
         return localizeDigits(raw)
+    }
+
+    /**
+     * Returns the Monday 00:00 timestamp of the week containing [millis] for weekly grouping.
+     */
+    fun getWeekMondayStartMillis(millis: Long): Long {
+        val cal = Calendar.getInstance().apply {
+            timeInMillis = millis
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val dow = cal.get(Calendar.DAY_OF_WEEK)
+        val diffToMonday = if (dow == Calendar.SUNDAY) -6 else (Calendar.MONDAY - dow)
+        cal.add(Calendar.DAY_OF_YEAR, diffToMonday)
+        return cal.timeInMillis
+    }
+
+    fun formatWeekRangeLabel(mondayMillis: Long): String {
+        val startCal = Calendar.getInstance().apply { timeInMillis = mondayMillis }
+        val endCal = Calendar.getInstance().apply {
+            timeInMillis = mondayMillis
+            add(Calendar.DAY_OF_YEAR, 6)
+        }
+        val sdfShort = SimpleDateFormat("dd/MM", Locale.US)
+        val range = "${sdfShort.format(startCal.time)} ← ${sdfShort.format(endCal.time)}"
+        return "أسبوع ${ltrIsolate(range)}"
     }
 
     fun parseStrictDate(input: String): Long? {
@@ -250,7 +312,7 @@ object ElamalUtils {
 
             val output = BufferedReader(InputStreamReader(process.inputStream)).readText()
 
-            val p1 = Regex("""SSID:\s*"([^"]+)"""")
+            val p1 = Regex("SSID:\\s*\"([^\"]+)\"")
             p1.find(output)?.groupValues?.getOrNull(1)?.let {
                 if (it.isNotBlank() && it != "<unknown ssid>" && it != "0x") {
                     val clean = it.trim()
@@ -259,7 +321,7 @@ object ElamalUtils {
                 }
             }
 
-            val p2 = Regex("""SSID:\s*([^,\n"]+)""")
+            val p2 = Regex("SSID:\\s*([^,\\n\"]+)")
             p2.find(output)?.groupValues?.getOrNull(1)?.let {
                 val cleaned = it.trim()
                 if (cleaned.isNotBlank() && cleaned != "<unknown ssid>" && cleaned != "null" && cleaned != "0x") {
@@ -500,9 +562,9 @@ object ElamalUtils {
         alarmManager.cancel(pi)
     }
 
-    fun buildWhatsappFormattedText(entries: List<WorkEntry>, totalNet: Double, carryOver: Double): String {
+    fun buildWhatsappFormattedText(entries: List<WorkEntry>, totalNet: Double, carryOver: Double, title: String = "ملخص تطبيق «العمل»"): String {
         val sb = StringBuilder()
-        sb.append("*📊 ملخص تطبيق «العمل»*\n")
+        sb.append("*📊 $title*\n")
         sb.append("━━━━━━━━━━━━━━\n")
         var totalMins = 0L
         if (entries.isEmpty()) {
@@ -514,7 +576,8 @@ object ElamalUtils {
                     EntryType.HOURLY -> {
                         val m = if (e.endTime != null) ((e.endTime - e.startTime) / 60000L) - e.breakMinutes else 0L
                         totalMins += m.coerceAtLeast(0)
-                        "ساعات (${formatDurationArabic(m)})"
+                        val brkStr = if (e.breakMinutes > 0) " - استراحة ${e.breakMinutes}د" else ""
+                        "ساعات (${formatDurationArabic(m)}$brkStr)"
                     }
                     EntryType.REMOTE -> "عمل عن بعد"
                     EntryType.CREDIT -> "كريدي (-)"

@@ -24,11 +24,17 @@ interface ElamalDao {
     @Query("SELECT * FROM work_entries WHERE isDeleted = 0 ORDER BY startTime DESC, id DESC")
     suspend fun getAllEntriesSync(): List<WorkEntry>
 
+    @Query("SELECT * FROM work_entries ORDER BY startTime DESC, id DESC")
+    suspend fun getAllEntriesIncludingDeletedSync(): List<WorkEntry>
+
     @Query("SELECT * FROM work_entries WHERE isDeleted = 0 AND type = 'HOURLY' AND endTime IS NOT NULL AND id != :excludeId AND startTime < :endMillis AND endTime > :startMillis")
     suspend fun findOverlappingHourlyEntries(startMillis: Long, endMillis: Long, excludeId: Long = -1L): List<WorkEntry>
 
     @Query("SELECT COALESCE(SUM(calculatedAmount), 0.0) FROM work_entries WHERE isDeleted = 0 AND settlementId = :settlementId")
     suspend fun getSumForSettlement(settlementId: Long): Double
+
+    @Query("SELECT COUNT(*) FROM work_entries WHERE isDeleted = 0 AND settlementId = :settlementId")
+    suspend fun getActiveEntriesCountForSettlement(settlementId: Long): Int
 
     @Query("SELECT COUNT(*) FROM work_entries WHERE settlementId = :settlementId")
     suspend fun getAnyEntriesCountForSettlement(settlementId: Long): Int
@@ -50,6 +56,9 @@ interface ElamalDao {
 
     @Query("SELECT * FROM wifi_sessions ORDER BY endTime DESC LIMIT 1")
     suspend fun getLatestWifiSessionSync(): WifiSession?
+
+    @Query("UPDATE wifi_sessions SET isOpen = 0 WHERE isOpen = 1")
+    suspend fun closeAllOpenWifiSessions()
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEntry(entry: WorkEntry): Long
@@ -104,12 +113,13 @@ interface ElamalDao {
         val list = getSettlementsAsc()
         var runningCarry = 0.0
         for (s in list) {
-            val dynamicEntriesSum = roundMoney(getSumForSettlement(s.id))
+            val activeCount = getActiveEntriesCountForSettlement(s.id)
             val totalAttachedIncludingDeleted = getAnyEntriesCountForSettlement(s.id)
-            val effectiveEntriesTotal = if (dynamicEntriesSum != 0.0 || totalAttachedIncludingDeleted > 0) {
-                dynamicEntriesSum
-            } else {
-                roundMoney(s.entriesTotal)
+            val dynamicEntriesSum = roundMoney(getSumForSettlement(s.id))
+            val effectiveEntriesTotal = when {
+                activeCount > 0 -> dynamicEntriesSum
+                totalAttachedIncludingDeleted > 0 -> 0.0
+                else -> roundMoney(s.entriesTotal)
             }
             val paidRounded = roundMoney(s.amountPaid)
             val netDue = roundMoney(effectiveEntriesTotal + runningCarry)
@@ -168,10 +178,6 @@ abstract class ElamalDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: ElamalDatabase? = null
 
-        /**
-         * Safely inspects existing table columns via PRAGMA and adds any missing columns (#47).
-         * Protects users upgrading from any older schema (v1..v5) without data loss or crashes.
-         */
         private fun ensureSafeWorkEntriesSchema(db: SupportSQLiteDatabase) {
             val existingColumns = mutableSetOf<String>()
             db.query("PRAGMA table_info(`work_entries`)").use { cursor ->

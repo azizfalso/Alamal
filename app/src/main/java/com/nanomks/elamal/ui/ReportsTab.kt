@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import com.nanomks.elamal.data.EntryType
 import com.nanomks.elamal.data.WorkEntry
 import com.nanomks.elamal.util.ElamalUtils
+import java.text.SimpleDateFormat
 import java.util.*
 
 private data class ScopedReportMetrics(
@@ -47,6 +48,12 @@ private data class ScopedReportMetrics(
     val byDayMap: Map<String, List<WorkEntry>>,
     val dailyAverageMoney: Double,
     val bestDayKey: String?
+)
+
+private data class MonthChartBar(
+    val label: String,
+    val workAmount: Double,
+    val creditAmount: Double
 )
 
 @Composable
@@ -82,7 +89,7 @@ fun AppState.ReportsTab() {
         }
     }
 
-    val metrics = remember(scopedEntries, selectedReportScope, lastCarryOver) {
+    val metrics = remember(scopedEntries, selectedReportScope, lastCarryOver, prefsRefreshCounter) {
         val netSum = ElamalUtils.roundMoney(scopedEntries.sumOf { it.calculatedAmount })
         val effectiveNet = if (selectedReportScope == 0) ElamalUtils.roundMoney(netSum + lastCarryOver) else netSum
         val hourlyList = scopedEntries.filter { it.type == EntryType.HOURLY }
@@ -114,6 +121,61 @@ fun AppState.ReportsTab() {
             dailyAverageMoney = dailyAvg,
             bestDayKey = bestDay
         )
+    }
+
+    // 6-Month Work vs Credit series
+    val sixMonthsSeries = remember(allEntries) {
+        val monthFormat = SimpleDateFormat("yyyy-MM", Locale.US)
+        val shortNameFormat = SimpleDateFormat("MM/yy", Locale.US)
+        val buckets = (5 downTo 0).map { offset ->
+            val c = Calendar.getInstance().apply {
+                set(Calendar.DAY_OF_MONTH, 1)
+                add(Calendar.MONTH, -offset)
+            }
+            Triple(monthFormat.format(c.time), shortNameFormat.format(c.time), c)
+        }
+        buckets.map { (key, label, _) ->
+            var w = 0.0
+            var cr = 0.0
+            for (e in allEntries) {
+                if (monthFormat.format(Date(e.startTime)) == key) {
+                    if (e.type == EntryType.CREDIT) cr += kotlin.math.abs(e.calculatedAmount)
+                    else w += e.calculatedAmount
+                }
+            }
+            MonthChartBar(label, ElamalUtils.roundMoney(w), ElamalUtils.roundMoney(cr))
+        }
+    }
+
+    // Weekday average earnings for selected scope
+    val weekdayAverages = remember(scopedEntries) {
+        val dayTotals = mutableMapOf<String, Pair< Int, Double>>()
+        val cal = Calendar.getInstance()
+        scopedEntries.filter { it.type != EntryType.CREDIT }.forEach { e ->
+            val dateKey = ElamalUtils.formatDate(e.startTime)
+            cal.timeInMillis = e.startTime
+            val dow = cal.get(Calendar.DAY_OF_WEEK) // 1=Sun .. 7=Sat
+            val prev = dayTotals[dateKey]
+            dayTotals[dateKey] = dow to ((prev?.second ?: 0.0) + e.calculatedAmount)
+        }
+        val sums = DoubleArray(8)
+        val counts = IntArray(8)
+        dayTotals.values.forEach { (dow, amt) ->
+            sums[dow] += amt
+            counts[dow] += 1
+        }
+        val order = listOf(
+            Calendar.MONDAY to "إث",
+            Calendar.TUESDAY to "ثل",
+            Calendar.WEDNESDAY to "أر",
+            Calendar.THURSDAY to "خم",
+            Calendar.FRIDAY to "جم",
+            Calendar.SATURDAY to "سب",
+            Calendar.SUNDAY to "أح"
+        )
+        order.map { (dow, lbl) ->
+            lbl to (if (counts[dow] > 0) ElamalUtils.roundMoney(sums[dow] / counts[dow]) else 0.0)
+        }
     }
 
     val monthEntriesByDay = remember(allEntries, calendarYear, calendarMonth) {
@@ -267,7 +329,7 @@ fun AppState.ReportsTab() {
                         Button(
                             onClick = {
                                 val carry = if (selectedReportScope == 0) lastCarryOver else 0.0
-                                val txt = ElamalUtils.buildWhatsappFormattedText(scopedEntries, metrics.effectiveNet, carry)
+                                val txt = ElamalUtils.buildWhatsappFormattedText(scopedEntries, metrics.effectiveNet, carry, title = scopeTitle)
                                 val sendIntent = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
                                     putExtra(Intent.EXTRA_TEXT, txt)
@@ -380,20 +442,106 @@ fun AppState.ReportsTab() {
                         )
                     }
 
-                    val maxVal = maxOf(metrics.hourlyMoney, metrics.remoteMoney, metrics.creditMoney, 10.0)
+                    // 6-Month Work vs Credit Chart + Weekday Average Chart
+                    val maxMonthVal = remember(sixMonthsSeries) {
+                        sixMonthsSeries.maxOfOrNull { maxOf(it.workAmount, it.creditAmount) }?.coerceAtLeast(10.0) ?: 10.0
+                    }
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("التوزيع المالي للنطاق المختار:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Canvas(modifier = Modifier.fillMaxWidth().height(85.dp)) {
-                            val w = size.width
-                            val h = size.height
-                            val barW = w / 5.5f
-                            val h1 = maxOf(((metrics.hourlyMoney / maxVal) * (h - 12f)).toFloat(), 10f)
-                            val h2 = maxOf(((metrics.remoteMoney / maxVal) * (h - 12f)).toFloat(), 10f)
-                            val h3 = maxOf(((metrics.creditMoney / maxVal) * (h - 12f)).toFloat(), 10f)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("الأجور والكريدي (آخر 6 أشهر):", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("🟢 الأجور", fontSize = 10.5f.sp, color = colorScheme.onSurfaceVariant)
+                                Text("🔴 الكريدي", fontSize = 10.5f.sp, color = colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(96.dp)
+                                .padding(top = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            sixMonthsSeries.forEach { mBar ->
+                                Column(
+                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Bottom
+                                ) {
+                                    Row(
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
+                                        verticalAlignment = Alignment.Bottom
+                                    ) {
+                                        val wFrac = (mBar.workAmount / maxMonthVal).toFloat().coerceIn(0.05f, 1f)
+                                        val cFrac = (mBar.creditAmount / maxMonthVal).toFloat().coerceIn(0.05f, 1f)
+                                        Box(
+                                            modifier = Modifier
+                                                .width(10.dp)
+                                                .fillMaxHeight(if (mBar.workAmount > 0) wFrac else 0.04f)
+                                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                                .background(primaryCustom)
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .width(10.dp)
+                                                .fillMaxHeight(if (mBar.creditAmount > 0) cFrac else 0.04f)
+                                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                                .background(Color(0xFFDC2626).copy(alpha = 0.85f))
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                        Text(
+                                            text = ElamalUtils.localizeDigits(mBar.label),
+                                            fontSize = 9.5f.sp,
+                                            color = colorScheme.onSurfaceVariant,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
 
-                            drawRoundRect(Color(0xFF059669), topLeft = Offset(barW * 0.6f, h - h1), size = Size(barW, h1), cornerRadius = CornerRadius(10f, 10f))
-                            drawRoundRect(Color(0xFF2563EB), topLeft = Offset(barW * 2.25f, h - h2), size = Size(barW, h2), cornerRadius = CornerRadius(10f, 10f))
-                            drawRoundRect(Color(0xFFDC2626), topLeft = Offset(barW * 3.9f, h - h3), size = Size(barW, h3), cornerRadius = CornerRadius(10f, 10f))
+                    val maxWdVal = remember(weekdayAverages) {
+                        weekdayAverages.maxOfOrNull { it.second }?.coerceAtLeast(10.0) ?: 10.0
+                    }
+                    if (weekdayAverages.any { it.second > 0.0 }) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("متوسط الأجر حسب أيام الأسبوع (للنطاق المحدد):", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(78.dp)
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                weekdayAverages.forEach { (dayLbl, avgVal) ->
+                                    val frac = (avgVal / maxWdVal).toFloat().coerceIn(0.06f, 1f)
+                                    Column(
+                                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Bottom
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(16.dp)
+                                                .weight(1f, fill = false)
+                                                .fillMaxHeight(if (avgVal > 0) frac else 0.05f)
+                                                .clip(RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp))
+                                                .background(if (avgVal > 0) primaryCustom.copy(alpha = 0.8f) else colorScheme.surfaceVariant)
+                                        )
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Text(dayLbl, fontSize = 10.sp, color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
                         }
                     }
 

@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nanomks.elamal.R
@@ -57,8 +58,19 @@ fun AppState.RootContent(activity: FragmentActivity) {
     sysDark = isSystemInDarkTheme()
     primaryCustom = runCatching { Color(android.graphics.Color.parseColor(appColorHex)) }.getOrDefault(Color(0xFF059669))
 
-    // Harmonized ColorScheme: explicitly overrides secondaryContainer & primaryContainer
-    // so NavigationBar pills and FilledTonalIconButtons match the app's theme instead of default purple!
+    // Auto-lock observer: locks the app if left in background for >= 60 seconds using monotonic clock
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> onAppBackgrounded()
+                Lifecycle.Event.ON_START -> onAppForegrounded()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -123,7 +135,6 @@ fun AppState.RootContent(activity: FragmentActivity) {
         }
     }
 
-    // One-time startup sync: purge soft-deleted entries older than 7 days (#42)
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             ElamalUtils.processPendingWidgetEventsOnAppOpen(context, dao)
@@ -150,8 +161,6 @@ fun AppState.RootContent(activity: FragmentActivity) {
         }
     }
 
-    // Only show quick Undo button in TopAppBar if a deletion happened within the last 15 minutes (#43).
-    // Older deleted records remain safely accessible via the Trash icon or Settings!
     val hasRecentSoftDelete = remember(deletedEntries, lastSoftDeleteMillis, nowMillis) {
         deletedEntries.isNotEmpty() && (System.currentTimeMillis() - lastSoftDeleteMillis <= 15 * 60_000L)
     }
@@ -214,10 +223,11 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                         modifier = Modifier.size(32.dp)
                                     )
                                     Text(
-                                        text = "DH",
+                                        text = currencySymbol.take(3),
                                         color = Color.White,
-                                        fontSize = 11.5f.sp,
-                                        fontWeight = FontWeight.ExtraBold
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        maxLines = 1
                                     )
                                 }
                                 Column {
@@ -231,7 +241,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                             shape = RoundedCornerShape(6.dp)
                                         ) {
                                             Text(
-                                                text = "v4.6",
+                                                text = "v4.7",
                                                 fontSize = 10.sp,
                                                 color = primaryCustom,
                                                 fontWeight = FontWeight.Bold,

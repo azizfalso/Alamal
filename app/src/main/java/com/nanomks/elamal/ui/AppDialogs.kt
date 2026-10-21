@@ -176,7 +176,6 @@ private fun DateTimePickerSection(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Date Button
                 OutlinedCard(
                     modifier = Modifier
                         .weight(1.15f)
@@ -209,7 +208,6 @@ private fun DateTimePickerSection(
                     }
                 }
 
-                // Time Button
                 OutlinedCard(
                     modifier = Modifier
                         .weight(0.85f)
@@ -699,7 +697,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 4. Remote Entry Dialog (With Date Picker)
+    // 4. Remote Entry Dialog
     if (showRemoteDialog) {
         var amountInput by rememberSaveable { mutableStateOf("") }
         var noteInput by rememberSaveable { mutableStateOf("") }
@@ -723,8 +721,8 @@ fun AppState.AppDialogs() {
                     )
                     OutlinedTextField(
                         value = amountInput,
-                        onValueChange = { if (it.matches(Regex("""^\d*\.?\d*$"""))) amountInput = it },
-                        label = { Text("المبلغ (DH)") },
+                        onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) amountInput = it },
+                        label = { Text("المبلغ ($currencySymbol)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -759,7 +757,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 5. Credit (Advance/Deduction) Dialog (With Date Picker)
+    // 5. Credit Dialog
     if (showCreditDialog) {
         var amountInput by rememberSaveable { mutableStateOf("") }
         var noteInput by rememberSaveable { mutableStateOf("") }
@@ -783,8 +781,8 @@ fun AppState.AppDialogs() {
                     )
                     OutlinedTextField(
                         value = amountInput,
-                        onValueChange = { if (it.matches(Regex("""^\d*\.?\d*$"""))) amountInput = it },
-                        label = { Text("المبلغ المخصوم (DH)") },
+                        onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) amountInput = it },
+                        label = { Text("المبلغ المخصوم ($currencySymbol)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -843,8 +841,8 @@ fun AppState.AppDialogs() {
 
                     OutlinedTextField(
                         value = paidInput,
-                        onValueChange = { if (it.matches(Regex("""^\d*\.?\d*$"""))) paidInput = it },
-                        label = { Text("المبلغ المستلم فعلياً (DH)") },
+                        onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) paidInput = it },
+                        label = { Text("المبلغ المستلم فعلياً ($currencySymbol)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -918,8 +916,8 @@ fun AppState.AppDialogs() {
                     } else {
                         OutlinedTextField(
                             value = amountStr,
-                            onValueChange = { if (it.matches(Regex("""^\d*\.?\d*$"""))) amountStr = it },
-                            label = { Text("المبلغ (DH)") },
+                            onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) amountStr = it },
+                            label = { Text("المبلغ ($currencySymbol)") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
@@ -956,7 +954,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 7-B. Edit Settlement Dialog (Previously Missing!)
+    // 7-B. Edit Settlement Dialog
     val settlementToEdit = editingSettlement
     if (settlementToEdit != null) {
         var sTimestamp by rememberSaveable(settlementToEdit.id) { mutableLongStateOf(settlementToEdit.timestamp) }
@@ -983,8 +981,8 @@ fun AppState.AppDialogs() {
                     )
                     OutlinedTextField(
                         value = paidStr,
-                        onValueChange = { if (it.matches(Regex("""^\d*\.?\d*$"""))) paidStr = it },
-                        label = { Text("المبلغ المستلم فعلياً (DH)") },
+                        onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) paidStr = it },
+                        label = { Text("المبلغ المستلم فعلياً ($currencySymbol)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -1274,9 +1272,13 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 15. PIN Setup Dialog
+    // 15. PIN Setup Dialog (Now requires current PIN verification before changing or removing!)
     if (showPinSetupDialog) {
+        var oldPin by rememberSaveable { mutableStateOf("") }
         var newPin by rememberSaveable { mutableStateOf("") }
+        var confirmPin by rememberSaveable { mutableStateOf("") }
+        var isCheckingPin by remember { mutableStateOf(false) }
+
         AlertDialog(
             onDismissRequest = { showPinSetupDialog = false },
             shape = RoundedCornerShape(22.dp),
@@ -1286,40 +1288,88 @@ fun AppState.AppDialogs() {
                     modifier = Modifier.fillMaxWidth().imePadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(if (savedPin.isBlank()) "أدخل رمز قفل جديد (من 4 إلى 8 أرقام):" else "أدخل رمزاً جديداً أو اتركه فارغاً لإلغاء القفل:", fontSize = 12.sp)
+                    if (savedPin.isNotBlank()) {
+                        OutlinedTextField(
+                            value = oldPin,
+                            onValueChange = { if (it.length <= 8 && it.all { ch -> ch.isDigit() }) oldPin = it },
+                            label = { Text("الرمز الحالي (مطلوب للتعديل أو الإلغاء)") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+                    Text(
+                        if (savedPin.isBlank()) "أدخل رمز قفل جديد (من 4 إلى 8 أرقام):"
+                        else "أدخل رمزاً جديداً (4 إلى 8 أرقام) أو اتركه فارغاً لإلغاء القفل:",
+                        fontSize = 12.sp
+                    )
                     OutlinedTextField(
                         value = newPin,
                         onValueChange = { if (it.length <= 8 && it.all { ch -> ch.isDigit() }) newPin = it },
-                        label = { Text("رمز PIN") },
+                        label = { Text("الرمز الجديد") },
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp)
                     )
+                    if (newPin.isNotEmpty()) {
+                        OutlinedTextField(
+                            value = confirmPin,
+                            onValueChange = { if (it.length <= 8 && it.all { ch -> ch.isDigit() }) confirmPin = it },
+                            label = { Text("تأكيد الرمز الجديد") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
                 }
             },
             confirmButton = {
                 Button(
+                    enabled = !isCheckingPin,
                     onClick = {
-                        if (newPin.isBlank()) {
-                            savedPin = ""
-                            prefs.edit().remove("security_pin").remove("security_pin_length").apply()
-                            showPinSetupDialog = false
-                            showNotice("تم إلغاء قفل التطبيق ✓")
-                        } else if (newPin.length in 4..8) {
-                            viewModelScope.launch {
+                        viewModelScope.launch {
+                            isCheckingPin = true
+                            if (savedPin.isNotBlank()) {
+                                val oldOk = withContext(Dispatchers.Default) {
+                                    ElamalSecurity.verifyPin(oldPin, savedPin)
+                                }
+                                if (!oldOk) {
+                                    isCheckingPin = false
+                                    showNotice("⚠️ الرمز الحالي غير صحيح!")
+                                    return@launch
+                                }
+                            }
+                            if (newPin.isBlank()) {
+                                savedPin = ""
+                                prefs.edit().remove("security_pin").remove("security_pin_length").apply()
+                                isCheckingPin = false
+                                showPinSetupDialog = false
+                                showNotice("تم إلغاء قفل التطبيق ✓")
+                            } else if (newPin.length in 4..8) {
+                                if (newPin != confirmPin) {
+                                    isCheckingPin = false
+                                    showNotice("⚠️ تأكيد الرمز الجديد غير مطابق!")
+                                    return@launch
+                                }
                                 val hashed = withContext(Dispatchers.Default) { ElamalSecurity.hashPinPbkdf2(newPin) }
                                 savedPin = hashed
                                 prefs.edit()
                                     .putString("security_pin", hashed)
                                     .putInt("security_pin_length", newPin.length)
                                     .apply()
+                                isCheckingPin = false
                                 showPinSetupDialog = false
                                 showNotice("تم حفظ رمز القفل بنجاح ✓")
+                            } else {
+                                isCheckingPin = false
+                                showNotice("⚠️ يجب أن يكون الرمز بين 4 و 8 أرقام")
                             }
-                        } else {
-                            showNotice("⚠️ يجب أن يكون الرمز بين 4 و 8 أرقام")
                         }
                     },
                     shape = RoundedCornerShape(12.dp)

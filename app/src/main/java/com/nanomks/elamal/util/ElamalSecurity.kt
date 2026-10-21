@@ -18,19 +18,17 @@ import javax.crypto.spec.SecretKeySpec
 object ElamalSecurity {
 
     private const val KEYSTORE_ALIAS = "elamal_keystore_master_key_v1"
+    private const val PBKDF2_ITERATIONS_V2 = 120_000
+    private const val PBKDF2_ITERATIONS_V1 = 15_000
 
     fun hashPinPbkdf2(pin: String): String {
         val salt = ByteArray(16).apply { SecureRandom().nextBytes(this) }
-        val spec = PBEKeySpec(pin.toCharArray(), salt, 15000, 256)
+        val spec = PBEKeySpec(pin.toCharArray(), salt, PBKDF2_ITERATIONS_V2, 256)
         val hash = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
         val enc = Base64.getEncoder()
-        return "PBKDF2_V1:${enc.encodeToString(salt)}:${enc.encodeToString(hash)}"
+        return "PBKDF2_V2:$PBKDF2_ITERATIONS_V2:${enc.encodeToString(salt)}:${enc.encodeToString(hash)}"
     }
 
-    /**
-     * Returns the expected PIN length if stored in V2 format, or 0 if unknown/legacy.
-     * Used to avoid running heavy PBKDF2 on every digit press before reaching the full PIN length.
-     */
     fun getStoredPinLengthHint(prefs: SharedPreferences): Int {
         return prefs.getInt("security_pin_length", 0)
     }
@@ -38,13 +36,24 @@ object ElamalSecurity {
     fun verifyPin(inputPin: String, storedPin: String): Boolean {
         if (storedPin.isBlank()) return true
         return when {
+            storedPin.startsWith("PBKDF2_V2:") -> {
+                val parts = storedPin.split(":")
+                if (parts.size != 4) return false
+                val iter = parts[1].toIntOrNull() ?: PBKDF2_ITERATIONS_V2
+                val dec = Base64.getDecoder()
+                val salt = runCatching { dec.decode(parts[2]) }.getOrNull() ?: return false
+                val expected = runCatching { dec.decode(parts[3]) }.getOrNull() ?: return false
+                val spec = PBEKeySpec(inputPin.toCharArray(), salt, iter, 256)
+                val actual = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+                MessageDigest.isEqual(actual, expected)
+            }
             storedPin.startsWith("PBKDF2_V1:") -> {
                 val parts = storedPin.split(":")
                 if (parts.size != 3) return false
                 val dec = Base64.getDecoder()
                 val salt = runCatching { dec.decode(parts[1]) }.getOrNull() ?: return false
                 val expected = runCatching { dec.decode(parts[2]) }.getOrNull() ?: return false
-                val spec = PBEKeySpec(inputPin.toCharArray(), salt, 15000, 256)
+                val spec = PBEKeySpec(inputPin.toCharArray(), salt, PBKDF2_ITERATIONS_V1, 256)
                 val actual = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
                 MessageDigest.isEqual(actual, expected)
             }
@@ -104,11 +113,6 @@ object ElamalSecurity {
         }
     }
 
-    /**
-     * Retrieves the decrypted backup password from Android Keystore.
-     * If Keystore decryption fails (e.g. device lock screen changed or Keystore invalidated),
-     * sets `keystore_error_flag = true` and returns empty string so BackupSafManager NEVER writes plaintext silently!
-     */
     fun getBackupPassword(prefs: SharedPreferences): String {
         val encPayload = prefs.getString("backup_password_enc", null)
         if (!encPayload.isNullOrBlank() && encPayload.startsWith("KS_V1:")) {
@@ -142,24 +146,44 @@ object ElamalSecurity {
         require(password.isNotBlank()) { "كلمة مرور التشفير فارغة" }
         val salt = ByteArray(16).apply { SecureRandom().nextBytes(this) }
         val iv = ByteArray(12).apply { SecureRandom().nextBytes(this) }
-        val spec = PBEKeySpec(password.toCharArray(), salt, 15000, 256)
+        val spec = PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS_V2, 256)
         val secret = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
         val keySpec = SecretKeySpec(secret, "AES")
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, keySpec, GCMParameterSpec(128, iv))
         val encrypted = cipher.doFinal(plainJson.toByteArray(Charsets.UTF_8))
         val enc = Base64.getEncoder()
-        return "ELAMAL_ENC_V1:" + enc.encodeToString(salt) + ":" + enc.encodeToString(iv) + ":" + enc.encodeToString(encrypted)
+        return "ELAMAL_ENC_V2:$PBKDF2_ITERATIONS_V2:" + enc.encodeToString(salt) + ":" + enc.encodeToString(iv) + ":" + enc.encodeToString(encrypted)
     }
 
     fun decryptBackup(payload: String, password: String): String {
-        if (!payload.startsWith("ELAMAL_ENC_V1:")) return payload
+        if (!payload.startsWith("ELAMAL_ENC_V1:") && !payload.startsWith("ELAMAL_ENC_V2:")) return payload
         if (password.isBlank()) {
             throw IllegalArgumentException("هذا الملف مشفر! أدخل كلمة مرور النسخ الاحتياطي في الإعدادات أولاً")
         }
+        val dec = Base64.getDecoder()
+
+        if (payload.startsWith("ELAMAL_ENC_V2:")) {
+            val parts = payload.split(":")
+            require(parts.size == 5) { "ملف مشفر غير صالح" }
+            val iter = parts[1].toIntOrNull() ?: PBKDF2_ITERATIONS_V2
+            val salt = dec.decode(parts[2])
+            val iv = dec.decode(parts[3])
+            val cipherBytes = dec.decode(parts[4])
+            val result = runCatching {
+                val spec = PBEKeySpec(password.toCharArray(), salt, iter, 256)
+                val secret = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+                val keySpec = SecretKeySpec(secret, "AES")
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, keySpec, GCMParameterSpec(128, iv))
+                String(cipher.doFinal(cipherBytes), Charsets.UTF_8)
+            }.getOrNull()
+            if (result != null) return result
+            throw IllegalArgumentException("كلمة المرور غير صحيحة")
+        }
+
         val parts = payload.split(":")
         require(parts.size == 4) { "ملف مشفر غير صالح" }
-        val dec = Base64.getDecoder()
         val salt = dec.decode(parts[1])
         val iv = dec.decode(parts[2])
         val cipherBytes = dec.decode(parts[3])

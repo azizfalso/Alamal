@@ -118,12 +118,14 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
     var keystoreError by remember(statusBanner, backupPass) { mutableStateOf(ElamalSecurity.hasKeystoreDecryptionError(prefs)) }
     var newSsidInput by rememberSaveable { mutableStateOf("") }
 
-    // Expandable categories state memory
     var expandedCatIndex by rememberSaveable { mutableIntStateOf(0) }
 
     var rateInput by rememberSaveable(prefsRefreshCounter) {
         val cleanStr = if (hourlyRate % 1.0 == 0.0) hourlyRate.toInt().toString() else hourlyRate.toString()
         mutableStateOf(cleanStr)
+    }
+    var currencyInput by rememberSaveable(prefsRefreshCounter) {
+        mutableStateOf(currencySymbol)
     }
 
     val ssidList = remember(workSsids) {
@@ -147,9 +149,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 22.dp)
     ) {
-        // =========================================================================
-        // CATEGORY 0: المظهر، الألوان الباردة، الخط، والأرقام
-        // =========================================================================
+        // CATEGORY 0: المظهر
         item {
             ExpandableCategoryCard(
                 title = "قسم المظهر والتخصيص",
@@ -326,37 +326,54 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
             }
         }
 
-        // =========================================================================
-        // CATEGORY 1: قسم العمل والحسابات
-        // =========================================================================
+        // CATEGORY 1: قسم العمل والحسابات (مع تخصيص العملة)
         item {
             ExpandableCategoryCard(
                 title = "قسم العمل والحسابات",
-                subtitle = "سعر الساعة، وتنبيه نسيان الخروج",
+                subtitle = "العملة، سعر الساعة، وتنبيه نسيان الخروج",
                 icon = Icons.Default.Calculate,
                 accentColor = Color(0xFF059669),
                 isExpanded = expandedCatIndex == 1,
                 onToggle = { expandedCatIndex = if (expandedCatIndex == 1) -1 else 1 }
             ) {
-                OutlinedTextField(
-                    value = rateInput,
-                    onValueChange = { newText ->
-                        if (newText.isEmpty() || newText.matches(Regex("""^\d*\.?\d*$"""))) {
-                            rateInput = newText
-                            newText.toDoubleOrNull()?.let { r ->
-                                if (r > 0.0) {
-                                    hourlyRate = r
-                                    prefs.edit().putFloat("hourly_rate", r.toFloat()).apply()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = currencyInput,
+                        onValueChange = { newCur ->
+                            if (newCur.length <= 6) {
+                                currencyInput = newCur
+                                updateCurrencySymbol(newCur)
+                            }
+                        },
+                        label = { Text("العملة") },
+                        placeholder = { Text("DH") },
+                        modifier = Modifier.weight(0.75f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = rateInput,
+                        onValueChange = { newText ->
+                            if (newText.isEmpty() || newText.matches(Regex("^\\d*\\.?\\d*$"))) {
+                                rateInput = newText
+                                newText.toDoubleOrNull()?.let { r ->
+                                    if (r > 0.0) {
+                                        hourlyRate = r
+                                        prefs.edit().putFloat("hourly_rate", r.toFloat()).apply()
+                                    }
                                 }
                             }
-                        }
-                    },
-                    label = { Text("سعر الساعة الافتراضي (DH) - لا يغير الأرشيف") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
-                )
+                        },
+                        label = { Text("سعر الساعة ($currencySymbol)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1.25f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
 
                 Text("تنبيه نسيان الخروج: بعد $forgotAlarmHours ساعة (0 للإيقاف)", fontWeight = FontWeight.Medium, fontSize = 13.sp)
                 Slider(
@@ -385,9 +402,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
             }
         }
 
-        // =========================================================================
-        // CATEGORY 2: قسم التتبع الذكي والواي فاي (بدون رووت أو بالرووت + المنبه الموقظ)
-        // =========================================================================
+        // CATEGORY 2: قسم التتبع الذكي والواي فاي
         item {
             ExpandableCategoryCard(
                 title = "قسم التتبع الذكي والواي فاي",
@@ -586,13 +601,11 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
             }
         }
 
-        // =========================================================================
-        // CATEGORY 3: قسم الأمان والخصوصية (PIN + FLAG_SECURE)
-        // =========================================================================
+        // CATEGORY 3: قسم الأمان والخصوصية
         item {
             ExpandableCategoryCard(
                 title = "قسم الأمان والخصوصية",
-                subtitle = "حماية التطبيق بررمز PIN، البصمة، وحجب لقطة الشاشة",
+                subtitle = "حماية التطبيق برمز PIN، البصمة، وحجب لقطة الشاشة",
                 icon = Icons.Default.Security,
                 accentColor = Color(0xFF7C3AED),
                 isExpanded = expandedCatIndex == 3,
@@ -610,7 +623,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                             fontSize = 13.5f.sp,
                             color = if (savedPin.isBlank()) colorScheme.onSurfaceVariant else Color(0xFF059669)
                         )
-                        Text("يستخدم لوحة أرقام مدمجة آمنة", fontSize = 11.5f.sp, color = colorScheme.onSurfaceVariant)
+                        Text("يقفل تلقائياً بعد 60 ثانية بالخلفية", fontSize = 11.5f.sp, color = colorScheme.onSurfaceVariant)
                     }
                     Button(
                         onClick = { showPinSetupDialog = true },
@@ -629,7 +642,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("حجب الأرقام في التطبيقات الأخيرة (FLAG_SECURE)", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text("يمنع ظهور المبالغ في معاينة الشاشات بالخلفية", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
+                        Text("يمنع ظهور المبالغ في معاينة الشاشات ولقطات الشاشة", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
                     }
                     Switch(
                         checked = flagSecureEnabled,
@@ -643,13 +656,11 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
             }
         }
 
-        // =========================================================================
-        // CATEGORY 4: قسم النسخ الاحتياطي والاستعادة (SAF & Keystore)
-        // =========================================================================
+        // CATEGORY 4: قسم النسخ الاحتياطي والاستعادة
         item {
             ExpandableCategoryCard(
                 title = "قسم النسخ الاحتياطي والاستعادة",
-                subtitle = "الحفظ التلقائي الآمن وتشفير AES-256",
+                subtitle = "الحفظ التلقائي، النسخ اليومية، وتشفير AES-256",
                 icon = Icons.Default.CloudSync,
                 accentColor = Color(0xFFD97706),
                 isExpanded = expandedCatIndex == 4,
@@ -744,7 +755,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                 if (backupFilesList.isNotEmpty()) {
                     HorizontalDivider(color = colorScheme.onSurface.copy(alpha = 0.08f))
                     Text("النسخ المتوفرة في المجلد (${ElamalUtils.localizeDigits("${backupFilesList.size}")}):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    for (bf in backupFilesList.take(8)) {
+                    for (bf in backupFilesList.take(10)) {
                         Surface(
                             color = colorScheme.surfaceVariant.copy(alpha = 0.45f),
                             shape = RoundedCornerShape(10.dp),
@@ -757,8 +768,16 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                                    Text(bf, fontSize = 11.5f.sp, fontWeight = FontWeight.Medium)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = BackupSafManager.formatBackupFileLabel(bf),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colorScheme.onSurface
+                                    )
+                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                        Text(bf, fontSize = 10.sp, color = colorScheme.onSurfaceVariant)
+                                    }
                                 }
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     TextButton(onClick = { confirmRestoreFileName = bf }) {

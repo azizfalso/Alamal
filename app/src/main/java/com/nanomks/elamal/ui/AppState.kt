@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import android.os.SystemClock
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.SnackbarHostState
@@ -56,6 +57,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     )
     var fontScale by mutableFloatStateOf(prefs.getFloat("font_scale", 1.0f))
     var useArabicDigits by mutableStateOf(prefs.getBoolean("use_arabic_digits", false))
+    var currencySymbol by mutableStateOf(prefs.getString("currency_symbol", "DH") ?: "DH")
 
     var hourlyRate by mutableDoubleStateOf(prefs.getFloat("hourly_rate", 10.0f).toDouble())
     var prefsRefreshCounter by mutableIntStateOf(0)
@@ -72,6 +74,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
 
     var savedPin by mutableStateOf(prefs.getString("security_pin", "") ?: "")
     var isUnlocked by mutableStateOf(savedPin.isBlank())
+    var backgroundElapsedRealtime by mutableLongStateOf(0L)
     var failedPinAttempts by mutableIntStateOf(prefs.getInt("failed_pin_attempts", 0))
     var lockoutUntil by mutableLongStateOf(prefs.getLong("lockout_until", 0L))
     var flagSecureEnabled by mutableStateOf(prefs.getBoolean("flag_secure_enabled", savedPin.isNotBlank()))
@@ -138,6 +141,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
 
     init {
         ElamalUtils.useArabicDigits = useArabicDigits
+        ElamalUtils.currencySymbol = currencySymbol
         viewModelScope.launch {
             dao.getActiveEntries().collectLatest { entries = it }
         }
@@ -159,6 +163,30 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             dao.getVisibleWifiSessions().collectLatest { wifiSessions = it }
         }
+    }
+
+    fun onAppBackgrounded() {
+        if (savedPin.isNotBlank() && isUnlocked) {
+            backgroundElapsedRealtime = SystemClock.elapsedRealtime()
+        }
+    }
+
+    fun onAppForegrounded() {
+        if (savedPin.isNotBlank() && isUnlocked && backgroundElapsedRealtime > 0L) {
+            val awayMs = SystemClock.elapsedRealtime() - backgroundElapsedRealtime
+            if (awayMs >= 60_000L) {
+                isUnlocked = false
+            }
+            backgroundElapsedRealtime = 0L
+        }
+    }
+
+    fun updateCurrencySymbol(newSymbol: String) {
+        val clean = newSymbol.trim().take(6).ifEmpty { "DH" }
+        currencySymbol = clean
+        ElamalUtils.currencySymbol = clean
+        prefs.edit().putString("currency_symbol", clean).apply()
+        prefsRefreshCounter += 1
     }
 
     fun toggleArabicDigits(enabled: Boolean) {
@@ -219,6 +247,8 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
 
     fun refreshPrefsState() {
         hourlyRate = prefs.getFloat("hourly_rate", 10.0f).toDouble()
+        currencySymbol = prefs.getString("currency_symbol", "DH") ?: "DH"
+        ElamalUtils.currencySymbol = currencySymbol
         activeClockIn = prefs.getLong("active_clock_in", 0L)
         workSsids = prefs.getString("work_ssids", "") ?: ""
         prefsRefreshCounter += 1
@@ -337,6 +367,53 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             )
             dao.updateWifiSession(ws.copy(status = "ADDED"))
             showNotice("تم اعتماد فترة الواي فاي ✓")
+            scheduleSmartBackupDebounced()
+        }
+    }
+
+    /**
+     * Smart same-day Wi-Fi sessions merge:
+     * Combines multiple pending Wi-Fi sessions from the same day into a single work shift
+     * and automatically calculates the disconnection gaps as breakMinutes!
+     */
+    fun mergeAndApproveDayWifiSessions(daySessions: List<WifiSession>, forceIgnoreOverlap: Boolean = false) {
+        if (daySessions.size < 2) return
+        val sorted = daySessions.sortedBy { it.startTime }
+        val firstStart = sorted.first().startTime
+        val lastEnd = sorted.maxOf { it.endTime }
+        var totalGapMillis = 0L
+        for (i in 1 until sorted.size) {
+            val gap = (sorted[i].startTime - sorted[i - 1].endTime).coerceAtLeast(0L)
+            totalGapMillis += gap
+        }
+        val autoBreakMins = (totalGapMillis / 60_000L).toInt().coerceAtLeast(0)
+        val combinedSsids = sorted.map { it.ssid }.distinct().joinToString("+")
+
+        viewModelScope.launch {
+            if (!forceIgnoreOverlap) {
+                val overlaps = dao.findOverlappingHourlyEntries(firstStart, lastEnd)
+                if (overlaps.isNotEmpty()) {
+                    overlapWarningMessage = "الفترة المدمجة تتقاطع مع سجل ساعات موجود مسبقاً! هل تريد اعتمادها رغم التداخل؟"
+                    pendingForcedAction = { mergeAndApproveDayWifiSessions(daySessions, true) }
+                    return@launch
+                }
+            }
+            val pay = ElamalUtils.calculateHourlyPay(firstStart, lastEnd, autoBreakMins, hourlyRate)
+            dao.insertEntry(
+                WorkEntry(
+                    type = EntryType.HOURLY,
+                    startTime = firstStart,
+                    endTime = lastEnd,
+                    breakMinutes = autoBreakMins,
+                    hourlyRateAtEntry = hourlyRate,
+                    calculatedAmount = pay,
+                    note = "حضور واي فاي مدمج ($combinedSsids)"
+                )
+            )
+            for (s in sorted) {
+                dao.updateWifiSession(s.copy(status = "ADDED"))
+            }
+            showNotice("تم دمج ${sorted.size} فترات (استراحة ${autoBreakMins}د) واعتمادها ✓")
             scheduleSmartBackupDebounced()
         }
     }

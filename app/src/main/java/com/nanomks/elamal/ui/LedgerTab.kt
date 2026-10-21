@@ -1,5 +1,6 @@
 package com.nanomks.elamal.ui
 
+import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -28,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nanomks.elamal.R
 import com.nanomks.elamal.data.EntryType
+import com.nanomks.elamal.data.WorkEntry
 import com.nanomks.elamal.util.ElamalUtils
 
 @Composable
@@ -71,16 +74,17 @@ private fun HeroMiniStatPill(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppState.LedgerTab() {
+    val context = LocalContext.current
     val lastCarryOver = settlements.firstOrNull()?.nextCarryOver ?: 0.0
 
-    val (activeSum, totalMinutesActive, activeHourlySum, activeRemoteSum, activeCreditSum) = remember(entries) {
+    val (activeSum, totalMinutesActive, activeHourlySum, activeRemoteSum, activeCreditSum) = remember(entries, prefsRefreshCounter) {
         val sum = ElamalUtils.roundMoney(entries.sumOf { it.calculatedAmount })
         val mins = entries.filter { it.type == EntryType.HOURLY && it.endTime != null }
             .sumOf { (((it.endTime!! - it.startTime) / 60000L) - it.breakMinutes).coerceAtLeast(0) }
         val hSum = ElamalUtils.roundMoney(entries.filter { it.type == EntryType.HOURLY }.sumOf { it.calculatedAmount })
         val rSum = ElamalUtils.roundMoney(entries.filter { it.type == EntryType.REMOTE }.sumOf { it.calculatedAmount })
         val cSum = ElamalUtils.roundMoney(kotlin.math.abs(entries.filter { it.type == EntryType.CREDIT }.sumOf { it.calculatedAmount }))
-         quintuple(sum, mins, hSum, rSum, cSum)
+        quintuple(sum, mins, hSum, rSum, cSum)
     }
 
     val totalNet = ElamalUtils.roundMoney(activeSum + lastCarryOver)
@@ -245,7 +249,6 @@ fun AppState.LedgerTab() {
 
     Spacer(modifier = Modifier.height(10.dp))
 
-    // 4 perfectly proportioned action buttons matching height 48.dp & rounded 14.dp
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -333,6 +336,12 @@ fun AppState.LedgerTab() {
     }
 
     if (wifiSessions.isNotEmpty()) {
+        val mergeableDayGroups = remember(pendingWifiList) {
+            pendingWifiList.filter { !it.isOpen }
+                .groupBy { ElamalUtils.formatDate(it.startTime) }
+                .filter { it.value.size >= 2 }
+        }
+
         Spacer(modifier = Modifier.height(10.dp))
         OutlinedCard(
             modifier = Modifier.fillMaxWidth(),
@@ -358,6 +367,31 @@ fun AppState.LedgerTab() {
                         TextButton(onClick = { confirmIgnoreAllWifi = true }) {
                             Text("تجاهل الكل", color = Color(0xFFEF4444), fontSize = 12.sp)
                         }
+                    }
+                }
+
+                // Smart same-day merge button with automatic break calculation
+                mergeableDayGroups.forEach { (dayStr, dayList) ->
+                    val sorted = dayList.sortedBy { it.startTime }
+                    var gapMs = 0L
+                    for (i in 1 until sorted.size) {
+                        gapMs += (sorted[i].startTime - sorted[i - 1].endTime).coerceAtLeast(0L)
+                    }
+                    val brkMins = (gapMs / 60_000L).toInt().coerceAtLeast(0)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    FilledTonalButton(
+                        onClick = { mergeAndApproveDayWifiSessions(dayList) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.MergeType, contentDescription = "دمج الفترات", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            "دمج ${dayList.size} فترات ليوم ${ElamalUtils.ltrIsolate(dayStr)} (استراحة ${ElamalUtils.localizeDigits("$brkMins")}د)",
+                            fontSize = 11.5f.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 
@@ -414,7 +448,7 @@ fun AppState.LedgerTab() {
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("ابحث في الملاحظات...", fontSize = 13.sp) },
+            placeholder = { Text("ابحث في الملاحظات (يدعم البحث الذكي)...", fontSize = 13.sp) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث", modifier = Modifier.size(20.dp)) },
             trailingIcon = {
                 if (searchQuery.isNotBlank()) {
@@ -450,11 +484,16 @@ fun AppState.LedgerTab() {
         Spacer(modifier = Modifier.height(8.dp))
     }
 
-    val filtered = remember(entries, searchFilterEnabled, filterType, searchQuery) {
+    val normalizedQuery = remember(searchQuery) { ElamalUtils.normalizeArabicSearch(searchQuery) }
+    val filtered = remember(entries, searchFilterEnabled, filterType, normalizedQuery) {
         entries.filter {
             (!searchFilterEnabled || filterType == null || it.type == filterType) &&
-                    (!searchFilterEnabled || searchQuery.isBlank() || it.note.contains(searchQuery, ignoreCase = true))
+                    (!searchFilterEnabled || normalizedQuery.isEmpty() || ElamalUtils.normalizeArabicSearch(it.note).contains(normalizedQuery))
         }
+    }
+
+    val groupedByWeek = remember(filtered) {
+        filtered.groupBy { ElamalUtils.getWeekMondayStartMillis(it.startTime) }
     }
 
     if (filtered.isEmpty()) {
@@ -472,13 +511,66 @@ fun AppState.LedgerTab() {
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(bottom = 12.dp)
         ) {
-            items(filtered, key = { it.id }) { item ->
-                EntryRowCard(
-                    item = item,
-                    fontScale = fontScale,
-                    onEdit = { editingEntry = item },
-                    onDelete = { requestDeleteEntry(item) }
-                )
+            groupedByWeek.forEach { (weekMondayMillis, weekEntries) ->
+                item(key = "wk_hdr_$weekMondayMillis") {
+                    val weekNet = ElamalUtils.roundMoney(weekEntries.sumOf { it.calculatedAmount })
+                    val weekLabel = ElamalUtils.formatWeekRangeLabel(weekMondayMillis)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp, bottom = 2.dp, start = 4.dp, end = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = weekLabel,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = ElamalUtils.formatMoney(weekNet),
+                                    fontSize = 12.5f.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (weekNet < 0) Color(0xFFDC2626) else primaryCustom
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    val txt = ElamalUtils.buildWhatsappFormattedText(weekEntries, weekNet, 0.0, title = weekLabel)
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, txt)
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "مشاركة $weekLabel").apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Share,
+                                    contentDescription = "مشاركة الأسبوع",
+                                    tint = primaryCustom,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                items(weekEntries, key = { it.id }) { item ->
+                    EntryRowCard(
+                        item = item,
+                        fontScale = fontScale,
+                        onEdit = { editingEntry = item },
+                        onDelete = { requestDeleteEntry(item) }
+                    )
+                }
             }
         }
     }

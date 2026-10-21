@@ -10,11 +10,34 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object BackupSafManager {
 
     private val backupMutex = Mutex()
     private const val MAX_MANUAL_BACKUPS_TO_KEEP = 10
+
+    fun formatBackupFileLabel(fileName: String): String {
+        return when {
+            fileName == "elamal_auto_backup.json" -> "🔄 النسخة التلقائية الأساسية"
+            fileName.startsWith("elamal_snap_") -> {
+                val idx = fileName.removePrefix("elamal_snap_").removeSuffix(".json")
+                "📅 نسخة يومية سابقة ($idx)"
+            }
+            fileName.startsWith("elamal_safety_slot_") -> {
+                val idx = fileName.removePrefix("elamal_safety_slot_").removeSuffix(".json")
+                "🛡️ نسخة أمان قبل نقص بيانات ($idx)"
+            }
+            fileName.startsWith("elamal_manual_") -> {
+                val ts = fileName.removePrefix("elamal_manual_").removeSuffix(".json").toLongOrNull()
+                val dateStr = if (ts != null) SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(ts)) else ""
+                "💾 نسخة يدوية ($dateStr)"
+            }
+            else -> fileName
+        }
+    }
 
     suspend fun performSmartBackup(
         context: Context,
@@ -40,7 +63,8 @@ object BackupSafManager {
                 }
             }
 
-            val entries = dao.getAllEntriesSync()
+            val allEntries = dao.getAllEntriesIncludingDeletedSync()
+            val activeNonDeletedCount = allEntries.count { !it.isDeleted }
             val settlements = dao.getSettlementsAsc()
             val wifiSessions = dao.getAllWifiSessionsSync()
             val activeClockIn = prefs.getLong("active_clock_in", 0L)
@@ -49,22 +73,29 @@ object BackupSafManager {
             val prevSettlementsCount = prefs.getInt("last_backup_settlements_count", 0)
             val prevHadClockIn = prefs.getBoolean("last_backup_had_clockin", false)
 
-            if (entries.isEmpty() && settlements.isEmpty() && activeClockIn == 0L && (prevEntriesCount > 0 || prevSettlementsCount > 0)) {
+            if (activeNonDeletedCount == 0 && settlements.isEmpty() && activeClockIn == 0L && (prevEntriesCount > 0 || prevSettlementsCount > 0)) {
                 return@withContext "حماية تلقائية: تم منع الكتابة بنسخة فارغة فوق نسخة تحتوي على بيانات!"
             }
 
-            val dataDecreased = (entries.size < prevEntriesCount) ||
+            val dataDecreased = (activeNonDeletedCount < prevEntriesCount) ||
                     (settlements.size < prevSettlementsCount) ||
-                    (prevHadClockIn && activeClockIn == 0L && entries.size <= prevEntriesCount)
+                    (prevHadClockIn && activeClockIn == 0L && activeNonDeletedCount <= prevEntriesCount)
 
             val mainFile = dir.findFile("elamal_auto_backup.json")
-            if (!isManual && dataDecreased && mainFile != null) {
+            if (!isManual && mainFile != null) {
                 val prevContent = readUriText(context, mainFile.uri)
                 if (prevContent.isNotBlank()) {
-                    val slot = (prefs.getInt("safety_slot_index", 0) % 5) + 1
-                    prefs.edit().putInt("safety_slot_index", slot).apply()
-                    val safetyName = "elamal_safety_slot_${slot}.json"
-                    writeToDocumentFileFast(context, dir, safetyName, prevContent)
+                    val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                    if (prefs.getString("last_snap_day", "") != todayKey) {
+                        rotateDailySnapshots(context, dir, prevContent)
+                        prefs.edit().putString("last_snap_day", todayKey).apply()
+                    }
+                    if (dataDecreased) {
+                        val slot = (prefs.getInt("safety_slot_index", 0) % 5) + 1
+                        prefs.edit().putInt("safety_slot_index", slot).apply()
+                        val safetyName = "elamal_safety_slot_${slot}.json"
+                        writeToDocumentFileFast(context, dir, safetyName, prevContent)
+                    }
                 }
             }
 
@@ -73,10 +104,11 @@ object BackupSafManager {
             root.put("timestamp", System.currentTimeMillis())
             root.put("activeClockIn", activeClockIn)
             root.put("hourlyRate", prefs.getFloat("hourly_rate", 10f).toDouble())
+            root.put("currencySymbol", prefs.getString("currency_symbol", "DH") ?: "DH")
             root.put("workSsids", prefs.getString("work_ssids", "") ?: "")
 
             val entriesArr = JSONArray()
-            for (e in entries) {
+            for (e in allEntries) {
                 val obj = JSONObject().apply {
                     put("id", e.id)
                     put("type", e.type.name)
@@ -87,6 +119,8 @@ object BackupSafManager {
                     put("calculatedAmount", e.calculatedAmount)
                     put("note", e.note)
                     put("settlementId", e.settlementId ?: -1L)
+                    put("isDeleted", e.isDeleted)
+                    put("deletedAt", e.deletedAt ?: -1L)
                     if (!e.eventUuid.isNullOrBlank()) {
                         put("eventUuid", e.eventUuid)
                     }
@@ -145,12 +179,11 @@ object BackupSafManager {
                 if (verifyRead != finalPayload) {
                     return@withContext "⚠️ تحذير: فشل التحقق من سلامة الملف بعد الكتابة!"
                 }
-                // Automatically clean up old manual backups beyond the latest 10 (#45)
                 pruneOldManualBackups(dir)
             }
 
             prefs.edit()
-                .putInt("last_backup_entries_count", entries.size)
+                .putInt("last_backup_entries_count", activeNonDeletedCount)
                 .putInt("last_backup_settlements_count", settlements.size)
                 .putBoolean("last_backup_had_clockin", activeClockIn > 0L)
                 .putLong("last_backup_time", System.currentTimeMillis())
@@ -164,9 +197,16 @@ object BackupSafManager {
         }
     }
 
-    /**
-     * Deletes older `elamal_manual_<timestamp>.json` files, keeping only the newest [MAX_MANUAL_BACKUPS_TO_KEEP] (#45).
-     */
+    private fun rotateDailySnapshots(context: Context, dir: DocumentFile, currentAutoContent: String) {
+        runCatching {
+            val s1 = dir.findFile("elamal_snap_1.json")?.let { readUriText(context, it.uri) }
+            val s2 = dir.findFile("elamal_snap_2.json")?.let { readUriText(context, it.uri) }
+            if (!s2.isNullOrBlank()) writeToDocumentFileFast(context, dir, "elamal_snap_3.json", s2)
+            if (!s1.isNullOrBlank()) writeToDocumentFileFast(context, dir, "elamal_snap_2.json", s1)
+            writeToDocumentFileFast(context, dir, "elamal_snap_1.json", currentAutoContent)
+        }
+    }
+
     private fun pruneOldManualBackups(dir: DocumentFile) {
         runCatching {
             val manualFiles = dir.listFiles()
@@ -174,7 +214,7 @@ object BackupSafManager {
                     val name = f.name ?: ""
                     name.startsWith("elamal_manual_") && name.endsWith(".json")
                 }
-                .sortedByDescending { it.name ?: "" }
+                .sortedByDescending { it.lastModified() }
 
             if (manualFiles.size > MAX_MANUAL_BACKUPS_TO_KEEP) {
                 manualFiles.drop(MAX_MANUAL_BACKUPS_TO_KEEP).forEach { oldFile ->
@@ -226,6 +266,8 @@ object BackupSafManager {
                         val o = entriesArr.getJSONObject(i)
                         val endT = o.optLong("endTime", -1L).let { if (it == -1L) null else it }
                         val setId = o.optLong("settlementId", -1L).let { if (it == -1L) null else it }
+                        val isDel = o.optBoolean("isDeleted", false)
+                        val delAt = o.optLong("deletedAt", -1L).let { if (it == -1L) null else it }
                         val uuid = o.optString("eventUuid", "").takeIf { it.isNotBlank() }
                         parsedEntries.add(
                             WorkEntry(
@@ -238,9 +280,9 @@ object BackupSafManager {
                                 calculatedAmount = o.getDouble("calculatedAmount"),
                                 note = o.optString("note", ""),
                                 settlementId = setId,
-                                isDeleted = false,
+                                isDeleted = isDel,
                                 eventUuid = uuid,
-                                deletedAt = null
+                                deletedAt = delAt
                             )
                         )
                     }
@@ -284,6 +326,11 @@ object BackupSafManager {
                     if (root.has("hourlyRate")) {
                         editor.putFloat("hourly_rate", root.getDouble("hourlyRate").toFloat())
                     }
+                    if (root.has("currencySymbol")) {
+                        val cur = root.optString("currencySymbol", "DH").trim().ifEmpty { "DH" }
+                        editor.putString("currency_symbol", cur)
+                        ElamalUtils.currencySymbol = cur
+                    }
                     if (root.has("workSsids")) {
                         val restoredSsids = root.getString("workSsids")
                         if (restoredSsids.isNotBlank()) {
@@ -317,9 +364,15 @@ object BackupSafManager {
         if (uriStr.isBlank()) return emptyList()
         val dir = DocumentFile.fromTreeUri(context, Uri.parse(uriStr)) ?: return emptyList()
         return dir.listFiles()
+            .filter { f ->
+                val n = f.name ?: ""
+                n.startsWith("elamal_") && n.endsWith(".json")
+            }
+            .sortedWith(
+                compareByDescending<DocumentFile> { it.name == "elamal_auto_backup.json" }
+                    .thenByDescending { it.lastModified() }
+            )
             .mapNotNull { it.name }
-            .filter { it.startsWith("elamal_") && it.endsWith(".json") }
-            .sortedDescending()
     }
 
     fun deleteBackupFile(context: Context, fileName: String): Boolean {

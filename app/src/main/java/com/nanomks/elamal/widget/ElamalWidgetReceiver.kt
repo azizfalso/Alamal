@@ -39,6 +39,15 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
 
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED -> {
+                val pendingResult = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        ElamalDatabase.getInstance(context).dao().closeAllOpenWifiSessions()
+                    } catch (_: Exception) {
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
                 ElamalUtils.syncPeriodicWifiPollSchedule(context)
                 val activeStart = prefs.getLong("active_clock_in", 0L)
                 if (activeStart > 0L) {
@@ -79,7 +88,6 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
                         try {
                             val dao = ElamalDatabase.getInstance(context).dao()
                             val pay = ElamalUtils.calculateHourlyPay(activeStart, now, 0, rate)
-                            // 1. Insert entry into Room database FIRST before clearing active_clock_in!
                             dao.insertEntry(
                                 WorkEntry(
                                     type = EntryType.HOURLY,
@@ -90,7 +98,6 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
                                     note = "خروج سريع من الإشعار"
                                 )
                             )
-                            // 2. Only after DB commit succeeds, clear state & notifications
                             prefs.edit().putLong("active_clock_in", 0L).commit()
                             ElamalUtils.cancelForgotClockOutAlarm(context)
                             ElamalUtils.cancelOngoingWorkNotification(context)
@@ -137,7 +144,6 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
                                     put("rate", rate)
                                 }
                                 arr.put(ev)
-                                // Persist queue synchronously first
                                 prefs.edit().putString("widget_event_queue", arr.toString()).commit()
 
                                 val dao = ElamalDatabase.getInstance(context).dao()
@@ -243,6 +249,3 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
         }
     }
 }
-
-
-

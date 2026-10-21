@@ -46,6 +46,13 @@ object PdfReportGenerator {
         }
     }
 
+    private data class PreparedRow(
+        val entry: WorkEntry,
+        val cleanNote: String,
+        val noteLayout: StaticLayout,
+        val rowHeight: Float
+    )
+
     fun generateAndSharePdf(
         context: Context,
         reportTitle: String,
@@ -97,9 +104,50 @@ object PdfReportGenerator {
             val roundedCarry = ElamalUtils.roundMoney(carryOver)
             val finalNetTotal = ElamalUtils.roundMoney(entriesNetTotal + roundedCarry)
 
-            val chunks = if (entries.isEmpty()) listOf(emptyList()) else entries.chunked(16)
+            val leftX = 36f
+            val rightX = pageWidth - 36f
+            val baseRowH = 26f
+            val col1 = rightX - 118f
+            val col2 = col1 - 74f
+            val col3 = col2 - 92f
+            val col4 = col3 - 134f
+            val noteColWidth = (col3 - col4 - 14f).toInt().coerceAtLeast(60)
 
-            chunks.forEachIndexed { pageIndex, pageEntries ->
+            // Dynamic height-aware pagination to prevent bottom overflow when notes wrap to multiple lines
+            val preparedRows = entries.map { e ->
+                val cleanNote = e.note.replace("\n", " ").trim()
+                val layout = StaticLayout.Builder
+                    .obtain(cleanNote, 0, cleanNote.length, noteTextPaint, noteColWidth)
+                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                    .setMaxLines(3)
+                    .build()
+                val h = maxOf(baseRowH, layout.height + 10f)
+                PreparedRow(e, cleanNote, layout, h)
+            }
+
+            val pages = mutableListOf<List<PreparedRow>>()
+            if (preparedRows.isEmpty()) {
+                pages.add(emptyList())
+            } else {
+                var currentList = mutableListOf<PreparedRow>()
+                var currentY = 156f + baseRowH
+                val maxBottomY = pageHeight - 95f
+
+                for (row in preparedRows) {
+                    if (currentList.isNotEmpty() && currentY + row.rowHeight > maxBottomY) {
+                        pages.add(currentList)
+                        currentList = mutableListOf()
+                        currentY = 68f + baseRowH
+                    }
+                    currentList.add(row)
+                    currentY += row.rowHeight
+                }
+                if (currentList.isNotEmpty()) {
+                    pages.add(currentList)
+                }
+            }
+
+            pages.forEachIndexed { pageIndex, pageRows ->
                 val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex + 1).create()
                 val page = doc.startPage(pageInfo)
                 val canvas = page.canvas
@@ -113,7 +161,7 @@ object PdfReportGenerator {
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 paint.textAlign = Paint.Align.RIGHT
                 canvas.drawText(
-                    "تقرير «العمل» - $reportTitle (${pageIndex + 1}/${chunks.size})",
+                    "تقرير «العمل» - $reportTitle (${pageIndex + 1}/${pages.size})",
                     (pageWidth - 36).toFloat(),
                     46f,
                     paint
@@ -125,7 +173,6 @@ object PdfReportGenerator {
                     val cardBottom = 135f
                     val cardW = 165f
 
-                    // Card 1: Net Total (Includes CarryOver)
                     paint.color = if (isDarkMode) Color.parseColor("#064E3B") else Color.parseColor("#D1FAE5")
                     canvas.drawRoundRect(RectF(pageWidth - 36f - cardW, cardTop, pageWidth - 36f, cardBottom), 10f, 10f, paint)
                     paint.color = if (isDarkMode) Color.parseColor("#34D399") else Color.parseColor("#065F46")
@@ -143,7 +190,6 @@ object PdfReportGenerator {
                         )
                     }
 
-                    // Card 2: Total Hours
                     val c2Right = pageWidth - 36f - cardW - 14f
                     paint.color = if (isDarkMode) Color.parseColor("#1E3A8A") else Color.parseColor("#DBEAFE")
                     canvas.drawRoundRect(RectF(c2Right - cardW, cardTop, c2Right, cardBottom), 10f, 10f, paint)
@@ -153,7 +199,6 @@ object PdfReportGenerator {
                     paint.textSize = 15f
                     canvas.drawText(formatDurationPdfRtl(totalHourlyMinutes), c2Right - 12f, cardTop + 48f, paint)
 
-                    // Card 3: Credit & Remote
                     val c3Right = c2Right - cardW - 14f
                     paint.color = if (isDarkMode) Color.parseColor("#7F1D1D") else Color.parseColor("#FEE2E2")
                     canvas.drawRoundRect(RectF(36f, cardTop, c3Right, cardBottom), 10f, 10f, paint)
@@ -166,16 +211,6 @@ object PdfReportGenerator {
                     y = 156f
                 }
 
-                val leftX = 36f
-                val rightX = pageWidth - 36f
-                val baseRowH = 26f
-                val col1 = rightX - 118f
-                val col2 = col1 - 74f
-                val col3 = col2 - 92f
-                val col4 = col3 - 134f
-                val noteColWidth = (col3 - col4 - 14f).toInt().coerceAtLeast(60)
-
-                // Table Header
                 paint.style = Paint.Style.FILL
                 paint.color = headerBg
                 canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
@@ -198,15 +233,9 @@ object PdfReportGenerator {
                 canvas.drawText("الأجرة", col4 - 8f, y + 17f, paint)
                 y += baseRowH
 
-                for (e in pageEntries) {
-                    val cleanNote = e.note.replace("\n", " ").trim()
-                    val noteLayout = StaticLayout.Builder
-                        .obtain(cleanNote, 0, cleanNote.length, noteTextPaint, noteColWidth)
-                        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                        .setMaxLines(2)
-                        .build()
-
-                    val rowH = maxOf(baseRowH, noteLayout.height + 10f)
+                for (pRow in pageRows) {
+                    val e = pRow.entry
+                    val rowH = pRow.rowHeight
 
                     paint.style = Paint.Style.STROKE
                     paint.color = gridColor
@@ -246,10 +275,10 @@ object PdfReportGenerator {
                     } else "-"
                     canvas.drawText(durStr, col2 - 8f, y + 17f, paint)
 
-                    if (cleanNote.isNotEmpty()) {
+                    if (pRow.cleanNote.isNotEmpty()) {
                         canvas.save()
                         canvas.translate(col4 + 7f, y + 5f)
-                        noteLayout.draw(canvas)
+                        pRow.noteLayout.draw(canvas)
                         canvas.restore()
                     }
 
@@ -261,7 +290,7 @@ object PdfReportGenerator {
                     y += rowH
                 }
 
-                if (pageIndex == chunks.lastIndex) {
+                if (pageIndex == pages.lastIndex) {
                     if (roundedCarry != 0.0) {
                         paint.style = Paint.Style.FILL
                         paint.color = headerBg
@@ -304,7 +333,7 @@ object PdfReportGenerator {
                 paint.textSize = 10f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
                 canvas.drawText(
-                    "تطبيق «العمل» (com.nanomks.elamal v4.6) • نسق التقرير: ${if (isDarkMode) "داكن" else "فاتح للطباعة"} • ${dfDateTime.format(Date())}",
+                    "تطبيق «العمل» (com.nanomks.elamal v4.7) • نسق التقرير: ${if (isDarkMode) "داكن" else "فاتح للطباعة"} • ${dfDateTime.format(Date())}",
                     rightX,
                     pageHeight - 28f,
                     paint
@@ -342,18 +371,19 @@ object PdfReportGenerator {
             val reportsDir = File(context.cacheDir, "reports").apply { mkdirs() }
             val csvFile = File(reportsDir, "Elamal_Export_${System.currentTimeMillis()}.csv")
             val df = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+            val cur = ElamalUtils.currencySymbol
 
             FileOutputStream(csvFile).use { fos ->
                 fos.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
                 val sb = StringBuilder()
-                sb.append("المعرف,النوع,اليوم,البداية,النهاية,الاستراحة(د),المدة,الأجرة(DH),الملاحظة\n")
+                sb.append("المعرف,النوع,اليوم,البداية,النهاية,الاستراحة(د),المدة,الأجرة($cur),الملاحظة\n")
                 for (e in entries) {
                     val dayName = ElamalUtils.getArabicDayName(e.startTime)
                     val mins = if (e.endTime != null) ((e.endTime - e.startTime) / 60000L) - e.breakMinutes else 0L
                     val dur = if (e.type == EntryType.HOURLY) ElamalUtils.formatDurationArabic(mins) else "-"
                     val endStr = e.endTime?.let { df.format(Date(it)) } ?: ""
-                    val escapedNote = "\"" + e.note.replace("\"", "\"\"").replace("\n", " ") + "\""
-                    sb.append("${e.id},${e.type},$dayName,${df.format(Date(e.startTime))},$endStr,${e.breakMinutes},$dur,${e.calculatedAmount},$escapedNote\n")
+                    val safeNote = ElamalUtils.sanitizeCsvCell(e.note)
+                    sb.append("${e.id},${e.type},$dayName,${df.format(Date(e.startTime))},$endStr,${e.breakMinutes},$dur,${e.calculatedAmount},$safeNote\n")
                 }
                 fos.write(sb.toString().toByteArray(Charsets.UTF_8))
             }
