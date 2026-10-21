@@ -82,7 +82,6 @@ fun AppState.ReportsTab() {
         }
     }
 
-    // Memoized report calculations (#27 & #39)
     val metrics = remember(scopedEntries, selectedReportScope, lastCarryOver) {
         val netSum = ElamalUtils.roundMoney(scopedEntries.sumOf { it.calculatedAmount })
         val effectiveNet = if (selectedReportScope == 0) ElamalUtils.roundMoney(netSum + lastCarryOver) else netSum
@@ -117,7 +116,6 @@ fun AppState.ReportsTab() {
         )
     }
 
-    // Pre-group monthly calendar entries once per month/entries change (#27)
     val monthEntriesByDay = remember(allEntries, calendarYear, calendarMonth) {
         val map = mutableMapOf<Int, MutableList<WorkEntry>>()
         val c = Calendar.getInstance()
@@ -320,7 +318,7 @@ fun AppState.ReportsTab() {
                                 color = primaryCustom
                             )
                             Text(
-                                text = "عدد السجلات: ${scopedEntries.size} سجل • أيام العمل النشطة: ${metrics.byDayMap.size} يوم",
+                                text = "عدد السجلات: ${ElamalUtils.localizeDigits("${scopedEntries.size}")} سجل • أيام العمل النشطة: ${ElamalUtils.localizeDigits("${metrics.byDayMap.size}")} يوم",
                                 fontSize = 11.5f.sp,
                                 color = colorScheme.onSurfaceVariant
                             )
@@ -352,7 +350,7 @@ fun AppState.ReportsTab() {
                         RichMetricTile(
                             label = "العمل عن بعد",
                             value = ElamalUtils.formatMoney(metrics.remoteMoney),
-                            subValue = "${metrics.remoteCount} عملية",
+                            subValue = "${ElamalUtils.localizeDigits("${metrics.remoteCount}")} عملية",
                             accentColor = Color(0xFF2563EB),
                             modifier = Modifier.weight(1f)
                         )
@@ -362,14 +360,14 @@ fun AppState.ReportsTab() {
                         RichMetricTile(
                             label = "إجمالي الكريدي",
                             value = "-${ElamalUtils.formatMoney(metrics.creditMoney)}",
-                            subValue = "${metrics.creditCount} سلفة",
+                            subValue = "${ElamalUtils.localizeDigits("${metrics.creditCount}")} سلفة",
                             accentColor = Color(0xFFDC2626),
                             modifier = Modifier.weight(1f)
                         )
                         RichMetricTile(
                             label = "متوسط الدخل اليومي",
                             value = ElamalUtils.formatMoney(metrics.dailyAverageMoney),
-                            subValue = if (metrics.bestDayKey != null) "أعلى يوم: ${metrics.bestDayKey.takeLast(5)}" else "لا يوجد بعد",
+                            subValue = if (metrics.bestDayKey != null) "أعلى يوم: ${ElamalUtils.localizeDigits(metrics.bestDayKey.takeLast(5))}" else "لا يوجد بعد",
                             accentColor = Color(0xFFD97706),
                             modifier = Modifier.weight(1f)
                         )
@@ -402,7 +400,7 @@ fun AppState.ReportsTab() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (showScopedRecordsList) "إخفاء سجلات هذا النطاق (${scopedEntries.size})" else "استعراض سجلات هذا النطاق (${scopedEntries.size})",
+                            text = if (showScopedRecordsList) "إخفاء سجلات هذا النطاق (${ElamalUtils.localizeDigits("${scopedEntries.size}")})" else "استعراض سجلات هذا النطاق (${ElamalUtils.localizeDigits("${scopedEntries.size}")})",
                             fontSize = 12.5f.sp,
                             fontWeight = FontWeight.Bold,
                             color = primaryCustom
@@ -434,7 +432,7 @@ fun AppState.ReportsTab() {
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("عرض المزيد (${scopedEntries.size - visibleRecordsLimit} سجل متبقٍ)", fontWeight = FontWeight.Bold)
+                        Text("عرض المزيد (${ElamalUtils.localizeDigits("${scopedEntries.size - visibleRecordsLimit}")} سجل متبقٍ)", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -468,7 +466,7 @@ fun AppState.ReportsTab() {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Default.CalendarMonth, contentDescription = "التقويم التفاعلي", tint = primaryCustom)
                             Text(
-                                "التقويم التفاعلي (${calendarYear}/${calendarMonth + 1})",
+                                "التقويم التفاعلي (${ElamalUtils.localizeDigits("$calendarYear")}/${ElamalUtils.localizeDigits("${calendarMonth + 1}")})",
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 15.sp
                             )
@@ -556,7 +554,7 @@ fun AppState.ReportsTab() {
                                             verticalArrangement = Arrangement.Center
                                         ) {
                                             Text(
-                                                text = "$dayNum",
+                                                text = ElamalUtils.localizeDigits("$dayNum"),
                                                 fontSize = 12.sp,
                                                 lineHeight = 13.sp,
                                                 color = txtCol,
@@ -567,7 +565,7 @@ fun AppState.ReportsTab() {
                                                 Spacer(modifier = Modifier.height(1.dp))
                                                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                                                     Text(
-                                                        text = if (daySum > 0) "+${daySum.toInt()}" else "${daySum.toInt()}",
+                                                        text = ElamalUtils.localizeDigits(if (daySum > 0) "+${daySum.toInt()}" else "${daySum.toInt()}"),
                                                         fontSize = 9.sp,
                                                         lineHeight = 10.sp,
                                                         fontWeight = FontWeight.Bold,
@@ -608,13 +606,13 @@ fun AppState.ReportsTab() {
                             ) {
                                 Column {
                                     Text(
-                                        text = "📅 سجلات يوم $selectedCalendarDay/${calendarMonth + 1}/$calendarYear",
+                                        text = "📅 سجلات يوم ${ElamalUtils.localizeDigits("$selectedCalendarDay")}/${ElamalUtils.localizeDigits("${calendarMonth + 1}")}/${ElamalUtils.localizeDigits("$calendarYear")}",
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 13.5f.sp,
                                         color = primaryCustom
                                     )
                                     Text(
-                                        text = "عدد العمليات: ${selectedList.size} • الساعات: ${ElamalUtils.formatDurationArabic(dayTotalMins)}",
+                                        text = "عدد العمليات: ${ElamalUtils.localizeDigits("${selectedList.size}")} • الساعات: ${ElamalUtils.formatDurationArabic(dayTotalMins)}",
                                         fontSize = 11.5f.sp,
                                         color = colorScheme.onSurfaceVariant
                                     )
