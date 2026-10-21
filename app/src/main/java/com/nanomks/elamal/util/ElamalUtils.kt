@@ -42,6 +42,12 @@ object ElamalUtils {
     @Volatile
     private var lastDetectedSsidCache: String? = null
 
+    /**
+     * User preference for Arabic Eastern digits (٠١٢٣٤٥٦٧٨٩) vs Western digits (0123456789) (#19 & #48).
+     */
+    @Volatile
+    var useArabicDigits: Boolean = false
+
     private val LAUNCHER_ALIASES = listOf(
         "com.nanomks.elamal.LauncherDefault" to "#059669",
         "com.nanomks.elamal.LauncherAlt" to "#2563EB",
@@ -51,6 +57,26 @@ object ElamalUtils {
         "com.nanomks.elamal.LauncherIndigo" to "#4F46E5",
         "com.nanomks.elamal.LauncherSlate" to "#475569"
     )
+
+    fun localizeDigits(input: String): String {
+        if (!useArabicDigits) return input
+        val arabicDigits = charArrayOf('٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩')
+        val sb = StringBuilder(input.length)
+        for (ch in input) {
+            if (ch in '0'..'9') {
+                sb.append(arabicDigits[ch - '0'])
+            } else {
+                sb.append(ch)
+            }
+        }
+        return sb.toString()
+    }
+
+    /**
+     * Wraps numbers/dates in Unicode Left-to-Right Isolate (\u2066 ... \u2069)
+     * so they never get scrambled inside RTL Arabic sentences without breaking Compose Row layout.
+     */
+    fun ltrIsolate(text: String): String = "\u2066${localizeDigits(text)}\u2069"
 
     fun findClosestIconAlias(hexColor: String): String {
         val targetColor = runCatching { Color.parseColor(hexColor) }.getOrDefault(Color.parseColor("#059669"))
@@ -110,31 +136,37 @@ object ElamalUtils {
         val safeMin = minutesTotal.coerceAtLeast(0)
         val h = safeMin / 60
         val m = safeMin % 60
-        return "${h} س ${m} د"
+        return localizeDigits("${h} س ${m} د")
     }
 
     fun formatMoney(amount: Double): String {
-        return String.format(Locale.US, "%.2f DH", amount)
+        val raw = String.format(Locale.US, "%.2f DH", amount)
+        return localizeDigits(raw)
     }
 
     fun formatDate(millis: Long): String {
-        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
+        val raw = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
+        return localizeDigits(raw)
     }
 
     fun formatTime(millis: Long): String {
-        return SimpleDateFormat("HH:mm", Locale.US).format(Date(millis))
+        val raw = SimpleDateFormat("HH:mm", Locale.US).format(Date(millis))
+        return localizeDigits(raw)
     }
 
     fun formatDateTime(millis: Long): String {
-        return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(millis))
+        val raw = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(millis))
+        return localizeDigits(raw)
     }
 
     fun parseStrictDate(input: String): Long? {
-        val trimmed = input.trim()
+        val normalized = input.trim()
+            .replace('٠', '0').replace('١', '1').replace('٢', '2').replace('٣', '3').replace('٤', '4')
+            .replace('٥', '5').replace('٦', '6').replace('٧', '7').replace('٨', '8').replace('٩', '9')
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
         val pos = ParsePosition(0)
-        val d = sdf.parse(trimmed, pos)
-        return if (d != null && pos.index == trimmed.length) d.time else null
+        val d = sdf.parse(normalized, pos)
+        return if (d != null && pos.index == normalized.length) d.time else null
     }
 
     fun isWifiConnectedFast(context: Context): Boolean {
@@ -146,7 +178,7 @@ object ElamalUtils {
 
     /**
      * Tries non-root standard Android APIs first (zero battery cost).
-     * Falls back to root `su` ONLY if standard APIs return `<unknown ssid>` AND cooldown has passed.
+     * Works on non-rooted devices when Location permission is granted (#13 & #35).
      */
     @Suppress("DEPRECATION")
     private fun getStandardWifiSsidOrNull(context: Context): String? {
@@ -165,7 +197,7 @@ object ElamalUtils {
         }.getOrNull()
     }
 
-    fun getConnectedSsidViaRoot(context: Context? = null, forceFresh: Boolean = false): String? {
+    fun getConnectedSsid(context: Context? = null, forceFresh: Boolean = false): String? {
         if (context != null && !isWifiConnectedFast(context)) {
             lastDetectedSsidCache = null
             return null
@@ -180,9 +212,16 @@ object ElamalUtils {
             }
         }
 
-        // 2. Throttle `su` invocations: if called within 8 seconds and not forced, reuse cached SSID
+        // 2. Check if user allows root `su` fallback (#35 & #48)
+        val allowRootSu = context?.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
+            ?.getBoolean("wifi_use_root_su", true) ?: true
+        if (!allowRootSu) {
+            return lastDetectedSsidCache
+        }
+
+        // 3. Throttle `su` invocations: if called within 15 seconds and not forced, reuse cached SSID
         val now = System.currentTimeMillis()
-        if (!forceFresh && now - lastRootPollMillis < 8_000L) {
+        if (!forceFresh && now - lastRootPollMillis < 15_000L) {
             return lastDetectedSsidCache
         }
         lastRootPollMillis = now
@@ -241,7 +280,7 @@ object ElamalUtils {
 
         if (configuredList.isEmpty() && !forceFresh) return null
 
-        val currentSsid = getConnectedSsidViaRoot(context, forceFresh = forceFresh)
+        val currentSsid = getConnectedSsid(context, forceFresh = forceFresh)
         if (configuredList.isEmpty()) return currentSsid
 
         val now = System.currentTimeMillis()
@@ -286,10 +325,14 @@ object ElamalUtils {
         return currentSsid
     }
 
+    /**
+     * Supports waking alarm (RTC_WAKEUP) or battery-saving non-waking alarm (RTC) based on user setting (#40 & #48).
+     */
     fun syncPeriodicWifiPollSchedule(context: Context) {
         val prefs = context.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean("root_wifi_enabled", true)
         val hasSsids = !(prefs.getString("work_ssids", "").isNullOrBlank())
+        val wakeDeviceInDoze = prefs.getBoolean("wifi_wake_alarm", true)
 
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val intent = Intent(context, ElamalWidgetReceiver::class.java).apply {
@@ -301,8 +344,9 @@ object ElamalUtils {
         )
 
         if (enabled && hasSsids) {
+            val alarmType = if (wakeDeviceInDoze) AlarmManager.RTC_WAKEUP else AlarmManager.RTC
             am.setInexactRepeating(
-                AlarmManager.RTC,
+                alarmType,
                 System.currentTimeMillis() + AlarmManager.INTERVAL_FIFTEEN_MINUTES,
                 AlarmManager.INTERVAL_FIFTEEN_MINUTES,
                 pi
@@ -332,7 +376,7 @@ object ElamalUtils {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val startClockStr = SimpleDateFormat("HH:mm", Locale.US).format(Date(startMillis))
+        val startClockStr = formatTime(startMillis)
         val notif = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_menu_recent_history)
             .setContentTitle("جلسة عمل جارية (بدأت $startClockStr)")
@@ -363,7 +407,7 @@ object ElamalUtils {
             context, 303, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        am.set(AlarmManager.RTC, triggerAtMillis, pi)
+        am.set(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
     }
 
     private fun cancelWifiDisconnectTimeout(context: Context) {
@@ -453,7 +497,6 @@ object ElamalUtils {
     }
 
     fun buildWhatsappFormattedText(entries: List<WorkEntry>, totalNet: Double, carryOver: Double): String {
-        val df = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val sb = StringBuilder()
         sb.append("*📊 ملخص تطبيق «العمل»*\n")
         sb.append("━━━━━━━━━━━━━━\n")
@@ -462,7 +505,7 @@ object ElamalUtils {
             sb.append("لا توجد سجلات نشطة حالياً.\n")
         } else {
             for (e in entries) {
-                val dateStr = df.format(Date(e.startTime))
+                val dateStr = formatDate(e.startTime)
                 val typeStr = when (e.type) {
                     EntryType.HOURLY -> {
                         val m = if (e.endTime != null) ((e.endTime - e.startTime) / 60000L) - e.breakMinutes else 0L
