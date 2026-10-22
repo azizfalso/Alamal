@@ -1,6 +1,5 @@
 package com.nanomks.elamal.ui
 
-import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -18,11 +17,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -56,9 +56,13 @@ private data class MonthChartBar(
     val creditAmount: Double
 )
 
+private data class BalancePoint(
+    val dateLabel: String,
+    val value: Double
+)
+
 @Composable
 fun AppState.ReportsTab() {
-    val context = LocalContext.current
     val lastCarryOver = settlements.firstOrNull()?.nextCarryOver ?: 0.0
 
     val scopeTitle = when (selectedReportScope) {
@@ -123,6 +127,23 @@ fun AppState.ReportsTab() {
         )
     }
 
+    // Balance evolution series (Area Chart) for the selected scope
+    val balancePoints = remember(scopedEntries, selectedReportScope, lastCarryOver) {
+        val startCarry = if (selectedReportScope == 0) lastCarryOver else 0.0
+        val dayMap = TreeMap<String, Double>()
+        for (e in scopedEntries.sortedBy { it.startTime }) {
+            val dKey = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(e.startTime))
+            dayMap[dKey] = (dayMap[dKey] ?: 0.0) + e.calculatedAmount
+        }
+        val pts = mutableListOf<BalancePoint>()
+        var running = startCarry
+        for ((dKey, delta) in dayMap) {
+            running = ElamalUtils.roundMoney(running + delta)
+            pts.add(BalancePoint(dKey.takeLast(5), running))
+        }
+        pts
+    }
+
     // 6-Month Work vs Credit series
     val sixMonthsSeries = remember(allEntries) {
         val monthFormat = SimpleDateFormat("yyyy-MM", Locale.US)
@@ -147,14 +168,14 @@ fun AppState.ReportsTab() {
         }
     }
 
-    // Weekday average earnings for selected scope
+    // Weekday average earnings
     val weekdayAverages = remember(scopedEntries) {
-        val dayTotals = mutableMapOf<String, Pair< Int, Double>>()
+        val dayTotals = mutableMapOf<String, Pair<Int, Double>>()
         val cal = Calendar.getInstance()
         scopedEntries.filter { it.type != EntryType.CREDIT }.forEach { e ->
             val dateKey = ElamalUtils.formatDate(e.startTime)
             cal.timeInMillis = e.startTime
-            val dow = cal.get(Calendar.DAY_OF_WEEK) // 1=Sun .. 7=Sat
+            val dow = cal.get(Calendar.DAY_OF_WEEK)
             val prev = dayTotals[dateKey]
             dayTotals[dateKey] = dow to ((prev?.second ?: 0.0) + e.calculatedAmount)
         }
@@ -250,7 +271,7 @@ fun AppState.ReportsTab() {
                     }
 
                     Text(
-                        "اختر النطاق لعرض إحصائياته وسجلاته بالأسفل أو تصديره:",
+                        "اختر النطاق لعرض إحصائياته وسجلاته بالأسفل أو مشاركته:",
                         fontSize = 11.5f.sp,
                         color = colorScheme.onSurfaceVariant
                     )
@@ -305,54 +326,38 @@ fun AppState.ReportsTab() {
 
                     HorizontalDivider(color = colorScheme.onSurface.copy(alpha = 0.08f))
 
+                    val activeCarry = when (selectedReportScope) {
+                        0 -> lastCarryOver
+                        3 -> settlements.firstOrNull()?.previousCarryOver ?: 0.0
+                        else -> 0.0
+                    }
+
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = {
-                                val carry = when (selectedReportScope) {
-                                    0 -> lastCarryOver
-                                    3 -> settlements.firstOrNull()?.previousCarryOver ?: 0.0
-                                    else -> 0.0
-                                }
-                                exportPdfReportAsync(scopeTitle, scopedEntries, settlements, carry)
+                                openShareDialog(
+                                    title = scopeTitle,
+                                    targetEntries = scopedEntries,
+                                    netTotal = metrics.effectiveNet,
+                                    carryOver = activeCarry,
+                                    targetSettlements = settlements
+                                )
                             },
                             modifier = Modifier
-                                .weight(1.1f)
+                                .weight(1.35f)
                                 .height(44.dp),
                             shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp)
+                            contentPadding = PaddingValues(horizontal = 10.dp)
                         ) {
-                            Icon(Icons.Default.PictureAsPdf, contentDescription = "تصدير PDF", modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text("تصدير PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                        }
-
-                        Button(
-                            onClick = {
-                                val carry = if (selectedReportScope == 0) lastCarryOver else 0.0
-                                val txt = ElamalUtils.buildWhatsappFormattedText(scopedEntries, metrics.effectiveNet, carry, title = scopeTitle)
-                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, txt)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(Intent.createChooser(sendIntent, "مشاركة لواتساب").apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
-                            },
-                            modifier = Modifier
-                                .weight(1.1f)
-                                .height(44.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
-                        ) {
-                            Icon(Icons.Default.Share, contentDescription = "مشاركة واتساب", modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text("واتساب", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Icon(Icons.Default.Share, contentDescription = "مشاركة أو PDF", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("مشاركة (نص / PDF / نسخ)", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
 
                         OutlinedButton(
                             onClick = { exportCsvAsync(scopedEntries) },
                             modifier = Modifier
-                                .weight(0.85f)
+                                .weight(0.65f)
                                 .height(44.dp),
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp)
@@ -442,7 +447,87 @@ fun AppState.ReportsTab() {
                         )
                     }
 
-                    // 6-Month Work vs Credit Chart + Weekday Average Chart
+                    // Balance Evolution Area Chart (تطور الرصيد)
+                    if (balancePoints.size >= 2) {
+                        val minBal = remember(balancePoints) { balancePoints.minOf { it.value } }
+                        val maxBal = remember(balancePoints) { balancePoints.maxOf { it.value } }
+                        val hiBound = maxOf(maxBal, 0.0)
+                        val loBound = minOf(minBal, 0.0)
+                        val span = (hiBound - loBound).takeIf { it > 0.001 } ?: 1.0
+                        val lineCol = primaryCustom
+                        val fillCol = primaryCustom.copy(alpha = 0.18f)
+                        val zeroCol = colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
+
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("تطور الرصيد التراكمي:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                    Text(
+                                        text = ElamalUtils.formatMoney(balancePoints.last().value),
+                                        fontSize = 11.5f.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = primaryCustom
+                                    )
+                                }
+                            }
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(92.dp)
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                val w = size.width
+                                val h = size.height
+                                val yZero = ((hiBound - 0.0) / span * h).toFloat().coerceIn(0f, h)
+
+                                drawLine(
+                                    color = zeroCol,
+                                    start = Offset(0f, yZero),
+                                    end = Offset(w, yZero),
+                                    strokeWidth = 2f
+                                )
+
+                                val stepX = w / (balancePoints.size - 1).coerceAtLeast(1)
+                                val linePath = Path()
+                                val areaPath = Path()
+
+                                balancePoints.forEachIndexed { idx, pt ->
+                                    val x = idx * stepX
+                                    val y = ((hiBound - pt.value) / span * (h - 10f) + 5f).toFloat()
+                                    if (idx == 0) {
+                                        linePath.moveTo(x, y)
+                                        areaPath.moveTo(x, yZero)
+                                        areaPath.lineTo(x, y)
+                                    } else {
+                                        linePath.lineTo(x, y)
+                                        areaPath.lineTo(x, y)
+                                    }
+                                }
+                                areaPath.lineTo(w, yZero)
+                                areaPath.close()
+
+                                drawPath(path = areaPath, color = fillCol)
+                                drawPath(
+                                    path = linePath,
+                                    color = lineCol,
+                                    style = Stroke(width = 6f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("أدنى: ${ElamalUtils.formatMoney(minBal)}", fontSize = 10.5f.sp, color = colorScheme.onSurfaceVariant)
+                                Text("أعلى: ${ElamalUtils.formatMoney(maxBal)}", fontSize = 10.5f.sp, color = colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    // 6-Month Work vs Credit Chart
                     val maxMonthVal = remember(sixMonthsSeries) {
                         sixMonthsSeries.maxOfOrNull { maxOf(it.workAmount, it.creditAmount) }?.coerceAtLeast(10.0) ?: 10.0
                     }
@@ -785,6 +870,47 @@ fun AppState.ReportsTab() {
 
                         Spacer(modifier = Modifier.height(8.dp))
 
+                        // Quick Add buttons directly for the selected calendar day!
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            FilledTonalButton(
+                                onClick = { openQuickAddForCalendarDay(selectedCalendarDay, EntryType.HOURLY) },
+                                modifier = Modifier.weight(1f).height(38.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) {
+                                Text("+ يوم عمل", fontSize = 11.5f.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                            FilledTonalButton(
+                                onClick = { openQuickAddForCalendarDay(selectedCalendarDay, EntryType.REMOTE) },
+                                modifier = Modifier.weight(1f).height(38.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = if (isDark) Color(0xFF1E3A8A).copy(alpha = 0.45f) else Color(0xFFDBEAFE),
+                                    contentColor = if (isDark) Color(0xFF93C5FD) else Color(0xFF1E40AF)
+                                )
+                            ) {
+                                Text("+ عن بعد", fontSize = 11.5f.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                            FilledTonalButton(
+                                onClick = { openQuickAddForCalendarDay(selectedCalendarDay, EntryType.CREDIT) },
+                                modifier = Modifier.weight(1f).height(38.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = if (isDark) Color(0xFF7F1D1D).copy(alpha = 0.45f) else Color(0xFFFEE2E2),
+                                    contentColor = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B)
+                                )
+                            ) {
+                                Text("+ كريدي", fontSize = 11.5f.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
                         if (selectedList.isEmpty()) {
                             Surface(
                                 color = colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -792,8 +918,8 @@ fun AppState.ReportsTab() {
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = "لا توجد سجلات مسجلة في هذا اليوم.",
-                                    fontSize = 12.5f.sp,
+                                    text = "لا توجد سجلات مسجلة في هذا اليوم. اضغط أحد الأزرار أعلاه للإضافة.",
+                                    fontSize = 12.sp,
                                     color = colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.padding(14.dp)

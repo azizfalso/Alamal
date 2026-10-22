@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewModelScope
 import com.nanomks.elamal.MainActivity
+import com.nanomks.elamal.data.EntryType
+import com.nanomks.elamal.data.WorkEntry
 import com.nanomks.elamal.util.BackupSafManager
 import com.nanomks.elamal.util.ElamalSecurity
 import com.nanomks.elamal.util.ElamalUtils
@@ -145,15 +147,29 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
         "#475569" to "فولاذي بارد"
     )
 
+    val samplePreviewEntry = remember(hourlyRate, currencySymbol) {
+        val now = System.currentTimeMillis()
+        WorkEntry(
+            id = 1,
+            type = EntryType.HOURLY,
+            startTime = now - 8 * 3600_000L,
+            endTime = now,
+            breakMinutes = 30,
+            hourlyRateAtEntry = hourlyRate,
+            calculatedAmount = ElamalUtils.calculateHourlyPay(now - 8 * 3600_000L, now, 30, hourlyRate),
+            note = "معاينة حية لحجم الخط والمظهر"
+        )
+    }
+
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 22.dp)
     ) {
-        // CATEGORY 0: المظهر
+        // CATEGORY 0: المظهر والتخصيص (مع معاينة الخط الحية ومنتقي الألوان التفاعلي)
         item {
             ExpandableCategoryCard(
                 title = "قسم المظهر والتخصيص",
-                subtitle = "الألوان الباردة، حجم الخط، وأيقونة التطبيق",
+                subtitle = "الألوان، معاينة حجم الخط، وأيقونة التطبيق",
                 icon = Icons.Default.Palette,
                 accentColor = primaryCustom,
                 isExpanded = expandedCatIndex == 0,
@@ -243,7 +259,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                             .background(primaryCustom)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("اختيار لون مخصص يدوياً (${appColorHex})", fontWeight = FontWeight.Bold, fontSize = 12.5f.sp)
+                    Text("منتقي الألوان التفاعلي (${appColorHex})", fontWeight = FontWeight.Bold, fontSize = 12.5f.sp)
                 }
 
                 Surface(
@@ -290,16 +306,25 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("حجم الخط الشامل: ${String.format(Locale.US, "%.2fx", fontScale)}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("حجم الخط الشامل: ${(fontScale * 100).toInt()}%", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     if (fontScale != 1.0f) {
                         TextButton(onClick = {
                             fontScale = 1.0f
                             prefs.edit().putFloat("font_scale", 1.0f).apply()
                         }) {
-                            Text("إعادة للطبيعي", fontSize = 11.5f.sp)
+                            Text("الحجم الافتراضي (100%)", fontSize = 11.5f.sp)
                         }
                     }
                 }
+
+                // Live Font Size Preview Card!
+                EntryRowCard(
+                    item = samplePreviewEntry,
+                    fontScale = fontScale,
+                    onEdit = {},
+                    onDelete = {}
+                )
+
                 Slider(
                     value = fontScale,
                     onValueChange = {
@@ -326,15 +351,84 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
             }
         }
 
-        // CATEGORY 1: قسم العمل والحسابات (مع تخصيص العملة)
+        // CATEGORY 1: قسم تخصيص مظهر الودجت (الجديد!)
+        item {
+            ExpandableCategoryCard(
+                title = "قسم ودجت الشاشة الرئيسية",
+                subtitle = "تخصيص خلفية الودجت، لون النص، والتأكيد المزدوج",
+                icon = Icons.Default.Widgets,
+                accentColor = Color(0xFF0D9488),
+                isExpanded = expandedCatIndex == 1,
+                onToggle = { expandedCatIndex = if (expandedCatIndex == 1) -1 else 1 }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("تفعيل ودجت الشاشة الرئيسية", fontSize = 13.5f.sp, fontWeight = FontWeight.Bold)
+                        Text("عند الإيقاف يظهر «معطّل» ولا يستجيب للمس", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = widgetEnabled,
+                        onCheckedChange = {
+                            widgetEnabled = it
+                            prefs.edit().putBoolean("widget_enabled", it).apply()
+                            ElamalWidgetReceiver.refreshAllWidgets(context)
+                        }
+                    )
+                }
+
+                Text("خلفية الودجت:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val bgOptions = listOf(0 to "تلقائي", 1 to "شفاف", 2 to "بلا خلفية", 3 to "داكن")
+                    bgOptions.forEach { (idx, lbl) ->
+                        FilterChip(
+                            selected = widgetBgStyle == idx,
+                            onClick = { updateWidgetAppearance(bg = idx) },
+                            label = { Text(lbl, fontSize = 11.sp, maxLines = 1) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Text("لون نص الودجت:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val fgOptions = listOf(0 to "تلقائي حسب الخلفية", 1 to "أبيض دائماً", 2 to "أسود دائماً")
+                    fgOptions.forEach { (idx, lbl) ->
+                        FilterChip(
+                            selected = widgetFgStyle == idx,
+                            onClick = { updateWidgetAppearance(fg = idx) },
+                            label = { Text(lbl, fontSize = 11.sp, maxLines = 1) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("إظهار العنوان الفرعي أعلى حالة الودجت", fontSize = 13.sp)
+                    Switch(
+                        checked = widgetShowSubtitle,
+                        onCheckedChange = { updateWidgetAppearance(showSub = it) }
+                    )
+                }
+            }
+        }
+
+        // CATEGORY 2: قسم العمل والحسابات
         item {
             ExpandableCategoryCard(
                 title = "قسم العمل والحسابات",
                 subtitle = "العملة، سعر الساعة، وتنبيه نسيان الخروج",
                 icon = Icons.Default.Calculate,
                 accentColor = Color(0xFF059669),
-                isExpanded = expandedCatIndex == 1,
-                onToggle = { expandedCatIndex = if (expandedCatIndex == 1) -1 else 1 }
+                isExpanded = expandedCatIndex == 2,
+                onToggle = { expandedCatIndex = if (expandedCatIndex == 2) -1 else 2 }
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -402,15 +496,15 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
             }
         }
 
-        // CATEGORY 2: قسم التتبع الذكي والواي فاي
+        // CATEGORY 3: قسم التتبع الذكي والواي فاي (بدون صلاحية الموقع)
         item {
             ExpandableCategoryCard(
                 title = "قسم التتبع الذكي والواي فاي",
-                subtitle = "رصد شبكات العمل، تشغيل الرووت (su)، ومنبه Doze",
+                subtitle = "يعمل بدون صلاحية الموقع (بالروت أو التتبع العام)",
                 icon = Icons.Default.Wifi,
                 accentColor = Color(0xFF2563EB),
-                isExpanded = expandedCatIndex == 2,
-                onToggle = { expandedCatIndex = if (expandedCatIndex == 2) -1 else 2 }
+                isExpanded = expandedCatIndex == 3,
+                onToggle = { expandedCatIndex = if (expandedCatIndex == 3) -1 else 3 }
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -435,14 +529,15 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("استخدام أوامر الروت (su) للواي فاي", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text("عطله إذا كنت بلا روت وتعتمد على واجهة النظام القياسية", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
+                            Text("استخدام أوامر الروت (su) لمعرفة اسم الشبكة", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text("عند إيقافه: يسجّل فترات اتصال الواي فاي بدون روت وبدون صلاحية الموقع", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
                         }
                         Switch(
                             checked = wifiUseRootSu,
                             onCheckedChange = {
                                 wifiUseRootSu = it
                                 prefs.edit().putBoolean("wifi_use_root_su", it).apply()
+                                ElamalUtils.syncPeriodicWifiPollSchedule(context)
                             }
                         )
                     }
@@ -466,150 +561,136 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                         )
                     }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "الشبكة المقروءة الآن:",
-                            fontSize = 12.5f.sp,
-                            color = colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                            Text(
-                                text = detectedRootSsid ?: "اضغط فحص لقراءة الـ SSID",
-                                fontSize = 12.5f.sp,
-                                color = if (detectedRootSsid != null) Color(0xFF059669) else colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                viewModelScope.launch {
-                                    val ssid = withContext(Dispatchers.IO) {
-                                        ElamalUtils.pollAndMergeRootWifi(context, dao, forceFresh = true)
-                                    }
-                                    detectedRootSsid = ssid
-                                    if (ssid != null) {
-                                        showNotice("تم قراءة الشبكة: $ssid ✓")
-                                    } else {
-                                        showNotice("تعذر قراءة اسم الشبكة؛ اكتبه يدوياً أدناه")
-                                    }
-                                }
-                            },
-                            modifier = Modifier.weight(1f).height(42.dp),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("فحص الشبكة الآن", fontSize = 12.sp)
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                val current = detectedRootSsid
-                                if (current != null && ssidList.size < 6 && !ssidList.contains(current)) {
-                                    val updated = (ssidList + current).joinToString(",")
-                                    workSsids = updated
-                                    prefs.edit().putString("work_ssids", updated).apply()
-                                    ElamalUtils.syncPeriodicWifiPollSchedule(context)
-                                    viewModelScope.launch(Dispatchers.IO) { ElamalUtils.pollAndMergeRootWifi(context, dao) }
-                                    showNotice("تمت إضافة الشبكة $current ✓")
-                                } else {
-                                    showNotice("افحص الشبكة أولاً أو أضف اسمها بالأسفل")
-                                }
-                            },
-                            modifier = Modifier.weight(1f).height(42.dp),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("إضافة الشبكة الحالية", fontSize = 12.sp)
-                        }
-                    }
-
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        ssidList.forEach { itemSsid ->
-                            InputChip(
-                                selected = true,
-                                onClick = {
-                                    val updated = ssidList.filter { it != itemSsid }.joinToString(",")
-                                    workSsids = updated
-                                    prefs.edit().putString("work_ssids", updated).apply()
-                                    ElamalUtils.syncPeriodicWifiPollSchedule(context)
-                                },
-                                label = {
-                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                                        Text(itemSsid)
-                                    }
-                                },
-                                trailingIcon = { Icon(Icons.Default.Close, contentDescription = "حذف الشبكة", modifier = Modifier.size(15.dp)) }
-                            )
-                        }
-                    }
-
-                    if (ssidList.size < 6) {
+                    if (wifiUseRootSu) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            OutlinedTextField(
-                                value = newSsidInput,
-                                onValueChange = { newSsidInput = it },
-                                label = { Text("أضف اسم شبكة عمل يدوياً (SSID)") },
-                                modifier = Modifier.weight(1f),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
+                            Text(
+                                text = "الشبكة المقروءة الآن:",
+                                fontSize = 12.5f.sp,
+                                color = colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold
                             )
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = detectedRootSsid ?: "اضغط فحص لقراءة الـ SSID",
+                                    fontSize = 12.5f.sp,
+                                    color = if (detectedRootSsid != null) Color(0xFF059669) else colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = {
-                                    val clean = newSsidInput.trim()
-                                    if (clean.isNotEmpty() && ssidList.size < 6 && !ssidList.contains(clean)) {
-                                        val updated = (ssidList + clean).joinToString(",")
+                                    viewModelScope.launch {
+                                        val ssid = withContext(Dispatchers.IO) {
+                                            ElamalUtils.pollAndMergeRootWifi(context, dao, forceFresh = true)
+                                        }
+                                        detectedRootSsid = ssid
+                                        if (ssid != null) {
+                                            showNotice("تم قراءة الشبكة: $ssid ✓")
+                                        } else {
+                                            showNotice("تعذر قراءة اسم الشبكة؛ تأكد من صلاحية الروت أو أضفها يدوياً")
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).height(42.dp),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("فحص الشبكة الآن", fontSize = 12.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val current = detectedRootSsid
+                                    if (current != null && ssidList.size < 6 && !ssidList.contains(current)) {
+                                        val updated = (ssidList + current).joinToString(",")
                                         workSsids = updated
                                         prefs.edit().putString("work_ssids", updated).apply()
                                         ElamalUtils.syncPeriodicWifiPollSchedule(context)
-                                        newSsidInput = ""
-                                        showNotice("تمت إضافة $clean ✓")
+                                        viewModelScope.launch(Dispatchers.IO) { ElamalUtils.pollAndMergeRootWifi(context, dao) }
+                                        showNotice("تمت إضافة الشبكة $current ✓")
+                                    } else {
+                                        showNotice("افحص الشبكة أولاً أو أضف اسمها بالأسفل")
                                     }
                                 },
-                                shape = RoundedCornerShape(12.dp)
-                            ) { Text("إضافة") }
+                                modifier = Modifier.weight(1f).height(42.dp),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("إضافة الشبكة الحالية", fontSize = 12.sp)
+                            }
+                        }
+
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            ssidList.forEach { itemSsid ->
+                                InputChip(
+                                    selected = true,
+                                    onClick = {
+                                        val updated = ssidList.filter { it != itemSsid }.joinToString(",")
+                                        workSsids = updated
+                                        prefs.edit().putString("work_ssids", updated).apply()
+                                        ElamalUtils.syncPeriodicWifiPollSchedule(context)
+                                    },
+                                    label = {
+                                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                            Text(itemSsid)
+                                        }
+                                    },
+                                    trailingIcon = { Icon(Icons.Default.Close, contentDescription = "حذف الشبكة", modifier = Modifier.size(15.dp)) }
+                                )
+                            }
+                        }
+
+                        if (ssidList.size < 6) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = newSsidInput,
+                                    onValueChange = { newSsidInput = it },
+                                    label = { Text("أضف اسم شبكة عمل يدوياً (SSID)") },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                Button(
+                                    onClick = {
+                                        val clean = newSsidInput.trim()
+                                        if (clean.isNotEmpty() && ssidList.size < 6 && !ssidList.contains(clean)) {
+                                            val updated = (ssidList + clean).joinToString(",")
+                                            workSsids = updated
+                                            prefs.edit().putString("work_ssids", updated).apply()
+                                            ElamalUtils.syncPeriodicWifiPollSchedule(context)
+                                            newSsidInput = ""
+                                            showNotice("تمت إضافة $clean ✓")
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(12.dp)
+                                ) { Text("إضافة") }
+                            }
                         }
                     }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("تفعيل ودجت الشاشة الرئيسية", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Switch(
-                        checked = widgetEnabled,
-                        onCheckedChange = {
-                            widgetEnabled = it
-                            prefs.edit().putBoolean("widget_enabled", it).apply()
-                            ElamalWidgetReceiver.refreshAllWidgets(context)
-                        }
-                    )
                 }
             }
         }
 
-        // CATEGORY 3: قسم الأمان والخصوصية
+        // CATEGORY 4: قسم الأمان والخصوصية
         item {
             ExpandableCategoryCard(
                 title = "قسم الأمان والخصوصية",
                 subtitle = "حماية التطبيق برمز PIN، البصمة، وحجب لقطة الشاشة",
                 icon = Icons.Default.Security,
                 accentColor = Color(0xFF7C3AED),
-                isExpanded = expandedCatIndex == 3,
-                onToggle = { expandedCatIndex = if (expandedCatIndex == 3) -1 else 3 }
+                isExpanded = expandedCatIndex == 4,
+                onToggle = { expandedCatIndex = if (expandedCatIndex == 4) -1 else 4 }
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -656,15 +737,15 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
             }
         }
 
-        // CATEGORY 4: قسم النسخ الاحتياطي والاستعادة
+        // CATEGORY 5: قسم النسخ الاحتياطي والاستعادة
         item {
             ExpandableCategoryCard(
                 title = "قسم النسخ الاحتياطي والاستعادة",
                 subtitle = "الحفظ التلقائي، النسخ اليومية، وتشفير AES-256",
                 icon = Icons.Default.CloudSync,
                 accentColor = Color(0xFFD97706),
-                isExpanded = expandedCatIndex == 4,
-                onToggle = { expandedCatIndex = if (expandedCatIndex == 4) -1 else 4 }
+                isExpanded = expandedCatIndex == 5,
+                onToggle = { expandedCatIndex = if (expandedCatIndex == 5) -1 else 5 }
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),

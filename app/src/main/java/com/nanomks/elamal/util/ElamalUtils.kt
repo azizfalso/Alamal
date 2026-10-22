@@ -11,9 +11,6 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.net.wifi.WifiInfo
-import android.net.wifi.WifiManager
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.nanomks.elamal.MainActivity
 import com.nanomks.elamal.data.ElamalDao
@@ -207,9 +204,6 @@ object ElamalUtils {
         return localizeDigits(raw)
     }
 
-    /**
-     * Returns the Monday 00:00 timestamp of the week containing [millis] for weekly grouping.
-     */
     fun getWeekMondayStartMillis(millis: Long): Long {
         val cal = Calendar.getInstance().apply {
             timeInMillis = millis
@@ -245,6 +239,9 @@ object ElamalUtils {
         return if (d != null && pos.index == normalized.length) d.time else null
     }
 
+    /**
+     * Checks Wi-Fi connectivity using only ACCESS_NETWORK_STATE (no location permission needed).
+     */
     fun isWifiConnectedFast(context: Context): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
         val activeNet = cm.activeNetwork ?: return false
@@ -252,41 +249,23 @@ object ElamalUtils {
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
-    @Suppress("DEPRECATION")
-    private fun getStandardWifiSsidOrNull(context: Context): String? {
-        return runCatching {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            val net = cm?.activeNetwork
-            val caps = net?.let { cm.getNetworkCapabilities(it) }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val info = caps?.transportInfo as? WifiInfo
-                val raw = info?.ssid?.removeSurrounding("\"")?.trim()
-                if (!raw.isNullOrBlank() && raw != "<unknown ssid>" && raw != "0x") return raw
-            }
-            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            val rawLegacy = wm?.connectionInfo?.ssid?.removeSurrounding("\"")?.trim()
-            if (!rawLegacy.isNullOrBlank() && rawLegacy != "<unknown ssid>" && rawLegacy != "0x") rawLegacy else null
-        }.getOrNull()
-    }
-
+    /**
+     * Location-free Wi-Fi detection:
+     * - When `wifi_use_root_su` is enabled, reads the exact SSID via root (`su`) without GPS/Location permission.
+     * - When `wifi_use_root_su` is disabled, tracks general Wi-Fi presence under "واي فاي العمل" without requiring SSID or Location permission.
+     */
     fun getConnectedSsid(context: Context? = null, forceFresh: Boolean = false): String? {
         if (context != null && !isWifiConnectedFast(context)) {
             lastDetectedSsidCache = null
             return null
         }
 
-        if (context != null) {
-            val stdSsid = getStandardWifiSsidOrNull(context)
-            if (stdSsid != null) {
-                lastDetectedSsidCache = stdSsid
-                return stdSsid
-            }
-        }
-
         val allowRootSu = context?.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
             ?.getBoolean("wifi_use_root_su", true) ?: true
         if (!allowRootSu) {
-            return lastDetectedSsidCache
+            val genericLabel = "واي فاي العمل"
+            lastDetectedSsidCache = genericLabel
+            return genericLabel
         }
 
         val now = System.currentTimeMillis()
@@ -341,19 +320,24 @@ object ElamalUtils {
         val prefs = context.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
         if (!prefs.getBoolean("root_wifi_enabled", true)) return null
 
+        val useRootSu = prefs.getBoolean("wifi_use_root_su", true)
         val configuredList = (prefs.getString("work_ssids", "") ?: "")
             .split(",")
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .take(6)
 
-        if (configuredList.isEmpty() && !forceFresh) return null
+        if (useRootSu && configuredList.isEmpty() && !forceFresh) return null
 
         val currentSsid = getConnectedSsid(context, forceFresh = forceFresh)
-        if (configuredList.isEmpty()) return currentSsid
+        if (useRootSu && configuredList.isEmpty()) return currentSsid
 
         val now = System.currentTimeMillis()
-        val isWorkWifi = currentSsid != null && configuredList.any { it.equals(currentSsid, ignoreCase = true) }
+        val isWorkWifi = if (!useRootSu) {
+            currentSsid != null
+        } else {
+            currentSsid != null && configuredList.any { it.equals(currentSsid, ignoreCase = true) }
+        }
 
         val latest = dao.getLatestWifiSessionSync()
 
@@ -397,7 +381,8 @@ object ElamalUtils {
     fun syncPeriodicWifiPollSchedule(context: Context) {
         val prefs = context.getSharedPreferences("elamal_prefs", Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean("root_wifi_enabled", true)
-        val hasSsids = !(prefs.getString("work_ssids", "").isNullOrBlank())
+        val useRootSu = prefs.getBoolean("wifi_use_root_su", true)
+        val hasSsids = !useRootSu || !(prefs.getString("work_ssids", "").isNullOrBlank())
         val wakeDeviceInDoze = prefs.getBoolean("wifi_wake_alarm", true)
 
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -562,20 +547,60 @@ object ElamalUtils {
         alarmManager.cancel(pi)
     }
 
-    fun buildWhatsappFormattedText(entries: List<WorkEntry>, totalNet: Double, carryOver: Double, title: String = "ملخص تطبيق «العمل»"): String {
+    /**
+     * Builds WhatsApp/Text summary with optional day-by-day details (`includeDetails`).
+     */
+    fun buildWhatsappFormattedText(
+        entries: List<WorkEntry>,
+        totalNet: Double,
+        carryOver: Double,
+        title: String = "ملخص تطبيق «العمل»",
+        includeDetails: Boolean = true
+    ): String {
         val sb = StringBuilder()
         sb.append("*📊 $title*\n")
         sb.append("━━━━━━━━━━━━━━\n")
+
         var totalMins = 0L
-        if (entries.isEmpty()) {
-            sb.append("لا توجد سجلات نشطة حالياً.\n")
-        } else {
+        var hourlyMoney = 0.0
+        var remoteMoney = 0.0
+        var creditMoney = 0.0
+        val activeDays = entries.map { formatDate(it.startTime) }.toSet().size
+
+        for (e in entries) {
+            when (e.type) {
+                EntryType.HOURLY -> {
+                    val m = if (e.endTime != null) ((e.endTime - e.startTime) / 60000L) - e.breakMinutes else 0L
+                    totalMins += m.coerceAtLeast(0)
+                    hourlyMoney += e.calculatedAmount
+                }
+                EntryType.REMOTE -> remoteMoney += e.calculatedAmount
+                EntryType.CREDIT -> creditMoney += kotlin.math.abs(e.calculatedAmount)
+            }
+        }
+
+        sb.append("📆 *أيام العمل:* ${localizeDigits("$activeDays")}\n")
+        sb.append("⏱ *مجموع الساعات:* ${formatDurationArabic(totalMins)}\n")
+        sb.append("💼 *أجور الساعات:* ${formatMoney(roundMoney(hourlyMoney))}\n")
+        if (remoteMoney > 0.0) {
+            sb.append("🏠 *العمل عن بعد:* +${formatMoney(roundMoney(remoteMoney))}\n")
+        }
+        if (creditMoney > 0.0) {
+            sb.append("🔻 *إجمالي الكريدي:* -${formatMoney(roundMoney(creditMoney))}\n")
+        }
+        if (carryOver != 0.0) {
+            sb.append("🔄 *رصيد مرحّل:* ${formatMoney(carryOver)}\n")
+        }
+        sb.append("💰 *الصافي المستحق:* *${formatMoney(totalNet)}*\n")
+
+        if (includeDetails && entries.isNotEmpty()) {
+            sb.append("━━━━━━━━━━━━━━\n")
+            sb.append("*📑 تفاصيل السجلات:*\n")
             for (e in entries) {
                 val dayAndDateStr = "${getArabicDayName(e.startTime)} ${formatDate(e.startTime)}"
                 val typeStr = when (e.type) {
                     EntryType.HOURLY -> {
                         val m = if (e.endTime != null) ((e.endTime - e.startTime) / 60000L) - e.breakMinutes else 0L
-                        totalMins += m.coerceAtLeast(0)
                         val brkStr = if (e.breakMinutes > 0) " - استراحة ${e.breakMinutes}د" else ""
                         "ساعات (${formatDurationArabic(m)}$brkStr)"
                     }
@@ -586,12 +611,6 @@ object ElamalUtils {
                 sb.append("• $dayAndDateStr | $typeStr: *${formatMoney(e.calculatedAmount)}*$notePart\n")
             }
         }
-        sb.append("━━━━━━━━━━━━━━\n")
-        sb.append("⏱ *مجموع الساعات:* ${formatDurationArabic(totalMins)}\n")
-        if (carryOver != 0.0) {
-            sb.append("🔄 *رصيد مرحّل:* ${formatMoney(carryOver)}\n")
-        }
-        sb.append("💰 *الصافي المستحق:* *${formatMoney(totalNet)}*")
-        return sb.toString()
+        return sb.toString().trimEnd()
     }
 }

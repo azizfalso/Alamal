@@ -59,7 +59,8 @@ object PdfReportGenerator {
         entries: List<WorkEntry>,
         settlements: List<Settlement>,
         isDarkMode: Boolean,
-        carryOver: Double = 0.0
+        carryOver: Double = 0.0,
+        includeDetails: Boolean = true
     ) {
         try {
             cleanupCachedReports(context, maxAgeMillis = 5 * 60_000L)
@@ -113,16 +114,19 @@ object PdfReportGenerator {
             val col4 = col3 - 134f
             val noteColWidth = (col3 - col4 - 14f).toInt().coerceAtLeast(60)
 
-            // Dynamic height-aware pagination to prevent bottom overflow when notes wrap to multiple lines
-            val preparedRows = entries.map { e ->
-                val cleanNote = e.note.replace("\n", " ").trim()
-                val layout = StaticLayout.Builder
-                    .obtain(cleanNote, 0, cleanNote.length, noteTextPaint, noteColWidth)
-                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                    .setMaxLines(3)
-                    .build()
-                val h = maxOf(baseRowH, layout.height + 10f)
-                PreparedRow(e, cleanNote, layout, h)
+            val preparedRows = if (includeDetails) {
+                entries.map { e ->
+                    val cleanNote = e.note.replace("\n", " ").trim()
+                    val layout = StaticLayout.Builder
+                        .obtain(cleanNote, 0, cleanNote.length, noteTextPaint, noteColWidth)
+                        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                        .setMaxLines(3)
+                        .build()
+                    val h = maxOf(baseRowH, layout.height + 10f)
+                    PreparedRow(e, cleanNote, layout, h)
+                }
+            } else {
+                emptyList()
             }
 
             val pages = mutableListOf<List<PreparedRow>>()
@@ -211,83 +215,85 @@ object PdfReportGenerator {
                     y = 156f
                 }
 
-                paint.style = Paint.Style.FILL
-                paint.color = headerBg
-                canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
-                paint.color = gridColor
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 1f
-                canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
-                canvas.drawLine(col1, y, col1, y + baseRowH, paint)
-                canvas.drawLine(col2, y, col2, y + baseRowH, paint)
-                canvas.drawLine(col3, y, col3, y + baseRowH, paint)
-                canvas.drawLine(col4, y, col4, y + baseRowH, paint)
-
-                paint.style = Paint.Style.FILL
-                paint.color = textColor
-                paint.textSize = 11f
-                canvas.drawText("اليوم والتاريخ", rightX - 8f, y + 17f, paint)
-                canvas.drawText("النوع", col1 - 8f, y + 17f, paint)
-                canvas.drawText("المدة", col2 - 8f, y + 17f, paint)
-                canvas.drawText("الملاحظة", col3 - 8f, y + 17f, paint)
-                canvas.drawText("الأجرة", col4 - 8f, y + 17f, paint)
-                y += baseRowH
-
-                for (pRow in pageRows) {
-                    val e = pRow.entry
-                    val rowH = pRow.rowHeight
-
-                    paint.style = Paint.Style.STROKE
+                if (includeDetails) {
+                    paint.style = Paint.Style.FILL
+                    paint.color = headerBg
+                    canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
                     paint.color = gridColor
-                    canvas.drawRect(leftX, y, rightX, y + rowH, paint)
-                    canvas.drawLine(col1, y, col1, y + rowH, paint)
-                    canvas.drawLine(col2, y, col2, y + rowH, paint)
-                    canvas.drawLine(col3, y, col3, y + rowH, paint)
-                    canvas.drawLine(col4, y, col4, y + rowH, paint)
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 1f
+                    canvas.drawRect(leftX, y, rightX, y + baseRowH, paint)
+                    canvas.drawLine(col1, y, col1, y + baseRowH, paint)
+                    canvas.drawLine(col2, y, col2, y + baseRowH, paint)
+                    canvas.drawLine(col3, y, col3, y + baseRowH, paint)
+                    canvas.drawLine(col4, y, col4, y + baseRowH, paint)
 
                     paint.style = Paint.Style.FILL
                     paint.color = textColor
-                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-                    paint.textSize = 9.5f
-                    canvas.drawText(formatArabicDayAndDatePdf(e.startTime), rightX - 6f, y + 17f, paint)
+                    paint.textSize = 11f
+                    canvas.drawText("اليوم والتاريخ", rightX - 8f, y + 17f, paint)
+                    canvas.drawText("النوع", col1 - 8f, y + 17f, paint)
+                    canvas.drawText("المدة", col2 - 8f, y + 17f, paint)
+                    canvas.drawText("الملاحظة", col3 - 8f, y + 17f, paint)
+                    canvas.drawText("الأجرة", col4 - 8f, y + 17f, paint)
+                    y += baseRowH
 
-                    val badgeBg = when (e.type) {
-                        EntryType.HOURLY -> Color.parseColor("#059669")
-                        EntryType.REMOTE -> Color.parseColor("#2563EB")
-                        EntryType.CREDIT -> Color.parseColor("#DC2626")
+                    for (pRow in pageRows) {
+                        val e = pRow.entry
+                        val rowH = pRow.rowHeight
+
+                        paint.style = Paint.Style.STROKE
+                        paint.color = gridColor
+                        canvas.drawRect(leftX, y, rightX, y + rowH, paint)
+                        canvas.drawLine(col1, y, col1, y + rowH, paint)
+                        canvas.drawLine(col2, y, col2, y + rowH, paint)
+                        canvas.drawLine(col3, y, col3, y + rowH, paint)
+                        canvas.drawLine(col4, y, col4, y + rowH, paint)
+
+                        paint.style = Paint.Style.FILL
+                        paint.color = textColor
+                        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                        paint.textSize = 9.5f
+                        canvas.drawText(formatArabicDayAndDatePdf(e.startTime), rightX - 6f, y + 17f, paint)
+
+                        val badgeBg = when (e.type) {
+                            EntryType.HOURLY -> Color.parseColor("#059669")
+                            EntryType.REMOTE -> Color.parseColor("#2563EB")
+                            EntryType.CREDIT -> Color.parseColor("#DC2626")
+                        }
+                        val badgeTxt = when (e.type) {
+                            EntryType.HOURLY -> "ساعات"
+                            EntryType.REMOTE -> "عن بعد"
+                            EntryType.CREDIT -> "كريدي"
+                        }
+                        paint.color = badgeBg
+                        canvas.drawRoundRect(RectF(col2 + 6f, y + 4f, col1 - 6f, y + 22f), 6f, 6f, paint)
+                        paint.color = Color.WHITE
+                        paint.textSize = 9.5f
+                        canvas.drawText(badgeTxt, col1 - 12f, y + 17f, paint)
+
+                        paint.color = textColor
+                        paint.textSize = 9.5f
+                        val durStr = if (e.type == EntryType.HOURLY && e.endTime != null) {
+                            val mins = ((e.endTime - e.startTime) / 60000L) - e.breakMinutes
+                            formatDurationPdfRtl(mins)
+                        } else "-"
+                        canvas.drawText(durStr, col2 - 8f, y + 17f, paint)
+
+                        if (pRow.cleanNote.isNotEmpty()) {
+                            canvas.save()
+                            canvas.translate(col4 + 7f, y + 5f)
+                            pRow.noteLayout.draw(canvas)
+                            canvas.restore()
+                        }
+
+                        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                        paint.textSize = 10f
+                        paint.color = if (e.calculatedAmount < 0) Color.parseColor("#DC2626") else textColor
+                        canvas.drawText(ElamalUtils.formatMoney(e.calculatedAmount), col4 - 8f, y + 17f, paint)
+
+                        y += rowH
                     }
-                    val badgeTxt = when (e.type) {
-                        EntryType.HOURLY -> "ساعات"
-                        EntryType.REMOTE -> "عن بعد"
-                        EntryType.CREDIT -> "كريدي"
-                    }
-                    paint.color = badgeBg
-                    canvas.drawRoundRect(RectF(col2 + 6f, y + 4f, col1 - 6f, y + 22f), 6f, 6f, paint)
-                    paint.color = Color.WHITE
-                    paint.textSize = 9.5f
-                    canvas.drawText(badgeTxt, col1 - 12f, y + 17f, paint)
-
-                    paint.color = textColor
-                    paint.textSize = 9.5f
-                    val durStr = if (e.type == EntryType.HOURLY && e.endTime != null) {
-                        val mins = ((e.endTime - e.startTime) / 60000L) - e.breakMinutes
-                        formatDurationPdfRtl(mins)
-                    } else "-"
-                    canvas.drawText(durStr, col2 - 8f, y + 17f, paint)
-
-                    if (pRow.cleanNote.isNotEmpty()) {
-                        canvas.save()
-                        canvas.translate(col4 + 7f, y + 5f)
-                        pRow.noteLayout.draw(canvas)
-                        canvas.restore()
-                    }
-
-                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                    paint.textSize = 10f
-                    paint.color = if (e.calculatedAmount < 0) Color.parseColor("#DC2626") else textColor
-                    canvas.drawText(ElamalUtils.formatMoney(e.calculatedAmount), col4 - 8f, y + 17f, paint)
-
-                    y += rowH
                 }
 
                 if (pageIndex == pages.lastIndex) {
@@ -333,7 +339,7 @@ object PdfReportGenerator {
                 paint.textSize = 10f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
                 canvas.drawText(
-                    "تطبيق «العمل» (com.nanomks.elamal v4.7) • نسق التقرير: ${if (isDarkMode) "داكن" else "فاتح للطباعة"} • ${dfDateTime.format(Date())}",
+                    "تطبيق «العمل» (com.nanomks.elamal v4.8) • نسق التقرير: ${if (isDarkMode) "داكن" else "فاتح للطباعة"} • ${dfDateTime.format(Date())}",
                     rightX,
                     pageHeight - 28f,
                     paint

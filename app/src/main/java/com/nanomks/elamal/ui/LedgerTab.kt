@@ -1,6 +1,5 @@
 package com.nanomks.elamal.ui
 
-import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -30,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nanomks.elamal.R
 import com.nanomks.elamal.data.EntryType
-import com.nanomks.elamal.data.WorkEntry
 import com.nanomks.elamal.util.ElamalUtils
 
 @Composable
@@ -74,7 +71,6 @@ private fun HeroMiniStatPill(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppState.LedgerTab() {
-    val context = LocalContext.current
     val lastCarryOver = settlements.firstOrNull()?.nextCarryOver ?: 0.0
 
     val (activeSum, totalMinutesActive, activeHourlySum, activeRemoteSum, activeCreditSum) = remember(entries, prefsRefreshCounter) {
@@ -169,6 +165,30 @@ fun AppState.LedgerTab() {
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                             )
                         }
+                        Surface(
+                            color = Color.White.copy(alpha = 0.18f),
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    openShareDialog(
+                                        title = "الفترة الحالية (غير مدفوعة)",
+                                        targetEntries = entries,
+                                        netTotal = totalNet,
+                                        carryOver = lastCarryOver
+                                    )
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Share,
+                                    contentDescription = "مشاركة الفترة الحالية",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -200,6 +220,30 @@ fun AppState.LedgerTab() {
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Inline warning banner if active session exceeds 16 hours (OPEN_WARN)
+                if (activeClockIn > 0L && elapsedActiveMin > 16 * 60L) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        color = Color(0xFFF59E0B).copy(alpha = 0.24f),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.WarningAmber, contentDescription = "تنبيه", tint = Color(0xFFFDE68A), modifier = Modifier.size(16.dp))
+                            Text(
+                                text = "مضى وقت طويل على الدخول. تأكد من مراجعة وقت الخروج عند الإنهاء.",
+                                color = Color(0xFFFDE68A),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
@@ -283,7 +327,10 @@ fun AppState.LedgerTab() {
         }
 
         FilledTonalIconButton(
-            onClick = { showManualHourlyDialog = true },
+            onClick = {
+                prefillDialogDateMillis = null
+                showManualHourlyDialog = true
+            },
             modifier = Modifier.size(48.dp),
             shape = RoundedCornerShape(14.dp)
         ) {
@@ -291,7 +338,10 @@ fun AppState.LedgerTab() {
         }
 
         FilledTonalButton(
-            onClick = { showRemoteDialog = true },
+            onClick = {
+                prefillDialogDateMillis = null
+                showRemoteDialog = true
+            },
             modifier = Modifier
                 .weight(0.95f)
                 .height(48.dp),
@@ -314,7 +364,10 @@ fun AppState.LedgerTab() {
         }
 
         FilledTonalButton(
-            onClick = { showCreditDialog = true },
+            onClick = {
+                prefillDialogDateMillis = null
+                showCreditDialog = true
+            },
             modifier = Modifier
                 .weight(0.95f)
                 .height(48.dp),
@@ -370,7 +423,6 @@ fun AppState.LedgerTab() {
                     }
                 }
 
-                // Smart same-day merge button with automatic break calculation
                 mergeableDayGroups.forEach { (dayStr, dayList) ->
                     val sorted = dayList.sortedBy { it.startTime }
                     var gapMs = 0L
@@ -542,13 +594,12 @@ fun AppState.LedgerTab() {
                             }
                             IconButton(
                                 onClick = {
-                                    val txt = ElamalUtils.buildWhatsappFormattedText(weekEntries, weekNet, 0.0, title = weekLabel)
-                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_TEXT, txt)
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    context.startActivity(Intent.createChooser(sendIntent, "مشاركة $weekLabel").apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+                                    openShareDialog(
+                                        title = "ملخص $weekLabel",
+                                        targetEntries = weekEntries,
+                                        netTotal = weekNet,
+                                        carryOver = 0.0
+                                    )
                                 },
                                 modifier = Modifier.size(28.dp)
                             ) {

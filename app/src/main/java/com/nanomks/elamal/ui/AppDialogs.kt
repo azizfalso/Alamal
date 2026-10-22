@@ -1,6 +1,8 @@
 package com.nanomks.elamal.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -472,12 +475,23 @@ private fun DateOnlyPickerButton(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppState.AppDialogs() {
+    val context = LocalContext.current
 
-    // 1. Clock-Out Dialog
+    // 1. Clock-Out Dialog (With >16h / >24h protection & editable end time)
     if (showClockOutDialog) {
         var breakInput by rememberSaveable { mutableStateOf("0") }
         var noteInput by rememberSaveable { mutableStateOf("") }
-        val elapsedMins = if (activeClockIn > 0L) ((System.currentTimeMillis() - activeClockIn) / 60000L).coerceAtLeast(0L) else 0L
+        val rawElapsedMins = if (activeClockIn > 0L) ((System.currentTimeMillis() - activeClockIn) / 60000L).coerceAtLeast(0L) else 0L
+        val isOver24h = rawElapsedMins > 24 * 60L
+        val isOver16h = rawElapsedMins > 16 * 60L
+
+        var customEndMillis by rememberSaveable(activeClockIn) {
+            val defaultEnd = if (isOver24h) activeClockIn + 8 * 3600_000L else System.currentTimeMillis()
+            mutableLongStateOf(defaultEnd)
+        }
+
+        val bMinPreview = breakInput.toIntOrNull() ?: 0
+        val effectiveMins = (((customEndMillis - activeClockIn) / 60000L) - bMinPreview).coerceAtLeast(0L)
 
         AlertDialog(
             onDismissRequest = { showClockOutDialog = false },
@@ -485,10 +499,38 @@ fun AppState.AppDialogs() {
             title = { Text("تسجيل الخروج وإنهاء الجلسة", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
-                    modifier = Modifier.fillMaxWidth().imePadding(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("مدة العمل المسجلة: ${ElamalUtils.formatDurationArabic(elapsedMins)}", fontWeight = FontWeight.Bold, color = primaryCustom)
+                    if (isOver16h) {
+                        Surface(
+                            color = Color(0xFFD97706).copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (isOver24h) "⚠️ مضى أكثر من 24 ساعة على الدخول! تم ضبط وقت خروج مقترح (8 ساعات)، يرجى مراجعته وتعديله."
+                                else "⚠️ مضى وقت طويل على الدخول (${ElamalUtils.formatDurationArabic(rawElapsedMins)}). تأكد من وقت الخروج.",
+                                color = Color(0xFFD97706),
+                                fontSize = 11.5f.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+
+                    DateTimePickerSection(
+                        label = "وقت الخروج الفعلي",
+                        timestampMillis = customEndMillis,
+                        accentColor = primaryCustom,
+                        onTimestampChange = { customEndMillis = it }
+                    )
+
+                    Text("المدة الصافية المحسوبة: ${ElamalUtils.formatDurationArabic(effectiveMins)}", fontWeight = FontWeight.Bold, color = primaryCustom)
+
                     QuickBreakField(
                         breakInput = breakInput,
                         accentColor = primaryCustom,
@@ -508,7 +550,7 @@ fun AppState.AppDialogs() {
                 Button(
                     onClick = {
                         val bMin = breakInput.toIntOrNull() ?: 0
-                        completeClockOut(bMin, noteInput)
+                        completeClockOut(bMin, noteInput, customEndMillis)
                     },
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -560,10 +602,12 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 3. Manual Hourly Entry Dialog
+    // 3. Manual Hourly Entry Dialog (Supports prefillDialogDateMillis from Calendar)
     if (showManualHourlyDialog) {
-        var startMillis by rememberSaveable {
+        val baseDayMillis = prefillDialogDateMillis ?: System.currentTimeMillis()
+        var startMillis by rememberSaveable(baseDayMillis) {
             val c = Calendar.getInstance().apply {
+                timeInMillis = baseDayMillis
                 set(Calendar.HOUR_OF_DAY, 9)
                 set(Calendar.MINUTE, 0)
                 set(Calendar.SECOND, 0)
@@ -571,8 +615,9 @@ fun AppState.AppDialogs() {
             }
             mutableLongStateOf(c.timeInMillis)
         }
-        var endMillis by rememberSaveable {
+        var endMillis by rememberSaveable(baseDayMillis) {
             val c = Calendar.getInstance().apply {
+                timeInMillis = baseDayMillis
                 set(Calendar.HOUR_OF_DAY, 17)
                 set(Calendar.MINUTE, 0)
                 set(Calendar.SECOND, 0)
@@ -590,7 +635,10 @@ fun AppState.AppDialogs() {
         } else 0.0
 
         AlertDialog(
-            onDismissRequest = { showManualHourlyDialog = false },
+            onDismissRequest = {
+                showManualHourlyDialog = false
+                prefillDialogDateMillis = null
+            },
             shape = RoundedCornerShape(22.dp),
             title = { Text("إضافة سجل ساعات يدوي", fontWeight = FontWeight.Bold) },
             text = {
@@ -692,19 +740,26 @@ fun AppState.AppDialogs() {
                 ) { Text("إضافة") }
             },
             dismissButton = {
-                TextButton(onClick = { showManualHourlyDialog = false }) { Text("إلغاء") }
+                TextButton(onClick = {
+                    showManualHourlyDialog = false
+                    prefillDialogDateMillis = null
+                }) { Text("إلغاء") }
             }
         )
     }
 
-    // 4. Remote Entry Dialog
+    // 4. Remote Entry Dialog (Supports prefillDialogDateMillis)
     if (showRemoteDialog) {
+        val initDate = prefillDialogDateMillis ?: System.currentTimeMillis()
         var amountInput by rememberSaveable { mutableStateOf("") }
         var noteInput by rememberSaveable { mutableStateOf("") }
-        var entryTimestamp by rememberSaveable { mutableLongStateOf(System.currentTimeMillis()) }
+        var entryTimestamp by rememberSaveable(initDate) { mutableLongStateOf(initDate) }
 
         AlertDialog(
-            onDismissRequest = { showRemoteDialog = false },
+            onDismissRequest = {
+                showRemoteDialog = false
+                prefillDialogDateMillis = null
+            },
             shape = RoundedCornerShape(22.dp),
             title = { Text("إضافة عمل عن بعد (مبلغ ثابت)", fontWeight = FontWeight.Bold) },
             text = {
@@ -752,19 +807,26 @@ fun AppState.AppDialogs() {
                 ) { Text("إضافة للدفتر") }
             },
             dismissButton = {
-                TextButton(onClick = { showRemoteDialog = false }) { Text("إلغاء") }
+                TextButton(onClick = {
+                    showRemoteDialog = false
+                    prefillDialogDateMillis = null
+                }) { Text("إلغاء") }
             }
         )
     }
 
-    // 5. Credit Dialog
+    // 5. Credit Dialog (Supports prefillDialogDateMillis)
     if (showCreditDialog) {
+        val initDate = prefillDialogDateMillis ?: System.currentTimeMillis()
         var amountInput by rememberSaveable { mutableStateOf("") }
         var noteInput by rememberSaveable { mutableStateOf("") }
-        var entryTimestamp by rememberSaveable { mutableLongStateOf(System.currentTimeMillis()) }
+        var entryTimestamp by rememberSaveable(initDate) { mutableLongStateOf(initDate) }
 
         AlertDialog(
-            onDismissRequest = { showCreditDialog = false },
+            onDismissRequest = {
+                showCreditDialog = false
+                prefillDialogDateMillis = null
+            },
             shape = RoundedCornerShape(22.dp),
             title = { Text("إضافة سلفة أو خصم (كريدي -)", fontWeight = FontWeight.Bold) },
             text = {
@@ -813,7 +875,10 @@ fun AppState.AppDialogs() {
                 ) { Text("خصم من الرصيد") }
             },
             dismissButton = {
-                TextButton(onClick = { showCreditDialog = false }) { Text("إلغاء") }
+                TextButton(onClick = {
+                    showCreditDialog = false
+                    prefillDialogDateMillis = null
+                }) { Text("إلغاء") }
             }
         )
     }
@@ -1229,35 +1294,125 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 14. Custom Color Picker Dialog
+    // 14. Interactive HSV Color Picker Dialog (With Live Preview + Hue/Saturation/Value Sliders + Hex)
     if (showCustomColorPickerDialog) {
-        var hexInput by rememberSaveable { mutableStateOf(appColorHex) }
+        val initialIntColor = remember(appColorHex) {
+            runCatching { android.graphics.Color.parseColor(appColorHex) }
+                .getOrDefault(android.graphics.Color.parseColor("#059669"))
+        }
+        val initialHsv = remember(initialIntColor) {
+            FloatArray(3).also { android.graphics.Color.colorToHSV(initialIntColor, it) }
+        }
+
+        var hue by rememberSaveable { mutableFloatStateOf(initialHsv[0]) }
+        var sat by rememberSaveable { mutableFloatStateOf(initialHsv[1]) }
+        var valueBri by rememberSaveable { mutableFloatStateOf(initialHsv[2]) }
+        var hexInput by rememberSaveable { mutableStateOf(appColorHex.removePrefix("#")) }
+
+        val currentColorInt = remember(hue, sat, valueBri) {
+            android.graphics.Color.HSVToColor(floatArrayOf(hue, sat, valueBri))
+        }
+        val currentPreviewColor = Color(currentColorInt)
+
+        fun syncHexFromHsv(h: Float, s: Float, v: Float) {
+            val cInt = android.graphics.Color.HSVToColor(floatArrayOf(h, s, v))
+            hexInput = String.format(Locale.US, "%06X", 0xFFFFFF and cInt)
+        }
+
         AlertDialog(
             onDismissRequest = { showCustomColorPickerDialog = false },
             shape = RoundedCornerShape(22.dp),
-            title = { Text("اختيار لون مخصص (Hex)", fontWeight = FontWeight.Bold) },
+            title = { Text("منتقي اللون المخصص", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
-                    modifier = Modifier.fillMaxWidth().imePadding(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedTextField(
-                        value = hexInput,
-                        onValueChange = { hexInput = it },
-                        label = { Text("كود اللون (مثال: #059669)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(68.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(currentPreviewColor)
+                            .border(1.dp, colorScheme.onSurface.copy(alpha = 0.15f), RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = "#${hexInput.uppercase()}",
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp
+                            )
+                        }
+                    }
+
+                    Text("درجة اللون (Hue): ${hue.toInt()}°", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Slider(
+                        value = hue,
+                        onValueChange = {
+                            hue = it
+                            syncHexFromHsv(hue, sat, valueBri)
+                        },
+                        valueRange = 0f..360f
                     )
+
+                    Text("التشبّع (Saturation): ${(sat * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Slider(
+                        value = sat,
+                        onValueChange = {
+                            sat = it
+                            syncHexFromHsv(hue, sat, valueBri)
+                        },
+                        valueRange = 0f..1f
+                    )
+
+                    Text("السطوع (Brightness): ${(valueBri * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Slider(
+                        value = valueBri,
+                        onValueChange = {
+                            valueBri = it
+                            syncHexFromHsv(hue, sat, valueBri)
+                        },
+                        valueRange = 0.15f..1f
+                    )
+
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        OutlinedTextField(
+                            value = hexInput,
+                            onValueChange = { raw ->
+                                val filtered = raw.filter { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }.take(6).uppercase()
+                                hexInput = filtered
+                                if (filtered.length == 6) {
+                                    runCatching {
+                                        val parsed = android.graphics.Color.parseColor("#$filtered")
+                                        val hsv = FloatArray(3)
+                                        android.graphics.Color.colorToHSV(parsed, hsv)
+                                        hue = hsv[0]
+                                        sat = hsv[1]
+                                        valueBri = hsv[2]
+                                    }
+                                }
+                            },
+                            label = { Text("HEX") },
+                            prefix = { Text("#") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val clean = if (hexInput.startsWith("#")) hexInput else "#$hexInput"
-                        val ok = runCatching { android.graphics.Color.parseColor(clean) }.isSuccess
+                        val candidate = if (hexInput.length == 6) "#$hexInput" else String.format(Locale.US, "#%06X", 0xFFFFFF and currentColorInt)
+                        val ok = runCatching { android.graphics.Color.parseColor(candidate) }.isSuccess
                         if (ok) {
-                            updateAppColor(clean)
+                            updateAppColor(candidate)
                             showCustomColorPickerDialog = false
                         } else {
                             showNotice("⚠️ كود لون غير صالح")
@@ -1272,7 +1427,7 @@ fun AppState.AppDialogs() {
         )
     }
 
-    // 15. PIN Setup Dialog (Now requires current PIN verification before changing or removing!)
+    // 15. PIN Setup Dialog
     if (showPinSetupDialog) {
         var oldPin by rememberSaveable { mutableStateOf("") }
         var newPin by rememberSaveable { mutableStateOf("") }
@@ -1409,6 +1564,119 @@ fun AppState.AppDialogs() {
                     overlapWarningMessage = null
                     pendingForcedAction = null
                 }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    // 17. Unified Share Options Dialog (WhatsApp Text / PDF / Copy to Clipboard + Details Toggle)
+    val sharePayload = pendingSharePayload
+    if (sharePayload != null) {
+        AlertDialog(
+            onDismissRequest = { pendingSharePayload = null },
+            shape = RoundedCornerShape(22.dp),
+            title = { Text(sharePayload.title, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        color = colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("تضمين تفاصيل السجلات والأيام", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(
+                                    text = if (shareIncludeDetails) "يرسل الخلاصة مع جدول الأيام بالتفصيل" else "يرسل الخلاصة والمجموع الصافي فقط",
+                                    fontSize = 11.sp,
+                                    color = colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = shareIncludeDetails,
+                                onCheckedChange = { updateShareIncludeDetails(it) }
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val txt = ElamalUtils.buildWhatsappFormattedText(
+                                    entries = sharePayload.entries,
+                                    totalNet = sharePayload.netTotal,
+                                    carryOver = sharePayload.carryOver,
+                                    title = sharePayload.title,
+                                    includeDetails = shareIncludeDetails
+                                )
+                                pendingSharePayload = null
+                                sharePlainTextIntent(context, txt, sharePayload.title)
+                            },
+                            modifier = Modifier.weight(1f).height(46.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = "مشاركة نص", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("مشاركة نص", fontWeight = FontWeight.Bold, fontSize = 12.5f.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                val withDet = shareIncludeDetails
+                                pendingSharePayload = null
+                                exportPdfReportAsync(
+                                    title = sharePayload.title,
+                                    reportEntries = sharePayload.entries,
+                                    reportSettlements = sharePayload.settlements,
+                                    carryOver = sharePayload.carryOver,
+                                    includeDetails = withDet
+                                )
+                            },
+                            modifier = Modifier.weight(1f).height(46.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, contentDescription = "مشاركة PDF", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("تقرير PDF", fontWeight = FontWeight.Bold, fontSize = 12.5f.sp)
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val txt = ElamalUtils.buildWhatsappFormattedText(
+                                entries = sharePayload.entries,
+                                totalNet = sharePayload.netTotal,
+                                carryOver = sharePayload.carryOver,
+                                title = sharePayload.title,
+                                includeDetails = shareIncludeDetails
+                            )
+                            pendingSharePayload = null
+                            copyTextToClipboard(txt)
+                        },
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "نسخ النص", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("نسخ النص إلى الحافظة", fontWeight = FontWeight.Bold, fontSize = 12.5f.sp)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { pendingSharePayload = null }) { Text("إلغاء") }
             }
         )
     }

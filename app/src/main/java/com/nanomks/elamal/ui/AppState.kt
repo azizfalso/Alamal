@@ -1,7 +1,10 @@
 package com.nanomks.elamal.ui
 
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.SystemClock
@@ -31,6 +34,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.Calendar
+
+data class ShareDialogPayload(
+    val title: String,
+    val entries: List<WorkEntry>,
+    val netTotal: Double,
+    val carryOver: Double = 0.0,
+    val settlements: List<Settlement> = emptyList()
+)
 
 class AppState(private val app: Application) : AndroidViewModel(app) {
 
@@ -62,7 +73,13 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var hourlyRate by mutableDoubleStateOf(prefs.getFloat("hourly_rate", 10.0f).toDouble())
     var prefsRefreshCounter by mutableIntStateOf(0)
     var activeClockIn by mutableLongStateOf(prefs.getLong("active_clock_in", 0L))
+
+    // Widget customization state
     var widgetEnabled by mutableStateOf(prefs.getBoolean("widget_enabled", true))
+    var widgetBgStyle by mutableIntStateOf(prefs.getInt("widget_bg_style", 0))
+    var widgetFgStyle by mutableIntStateOf(prefs.getInt("widget_fg_style", 0))
+    var widgetShowSubtitle by mutableStateOf(prefs.getBoolean("widget_show_subtitle", true))
+
     var rootWifiEnabled by mutableStateOf(prefs.getBoolean("root_wifi_enabled", true))
     var wifiUseRootSu by mutableStateOf(prefs.getBoolean("wifi_use_root_su", true))
     var wifiWakeAlarm by mutableStateOf(prefs.getBoolean("wifi_wake_alarm", true))
@@ -108,6 +125,9 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var customReportStartMillis by mutableLongStateOf(System.currentTimeMillis() - 14 * 86400_000L)
     var customReportEndMillis by mutableLongStateOf(System.currentTimeMillis())
 
+    // Pre-filled date when opening Add dialogs from the interactive calendar
+    var prefillDialogDateMillis by mutableStateOf<Long?>(null)
+
     var showClockOutDialog by mutableStateOf(false)
     var showEditActiveClockInDialog by mutableStateOf(false)
     var showManualHourlyDialog by mutableStateOf(false)
@@ -118,6 +138,10 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var showCustomColorPickerDialog by mutableStateOf(false)
     var showPinSetupDialog by mutableStateOf(false)
     var showTrashBinDialog by mutableStateOf(false)
+
+    // Unified share options dialog state
+    var pendingSharePayload by mutableStateOf<ShareDialogPayload?>(null)
+    var shareIncludeDetails by mutableStateOf(prefs.getBoolean("share_include_details", true))
 
     var editingEntry by mutableStateOf<WorkEntry?>(null)
     var pendingDeleteEntry by mutableStateOf<WorkEntry?>(null)
@@ -179,6 +203,82 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             }
             backgroundElapsedRealtime = 0L
         }
+    }
+
+    fun updateWidgetAppearance(bg: Int = widgetBgStyle, fg: Int = widgetFgStyle, showSub: Boolean = widgetShowSubtitle) {
+        widgetBgStyle = bg
+        widgetFgStyle = fg
+        widgetShowSubtitle = showSub
+        prefs.edit()
+            .putInt("widget_bg_style", bg)
+            .putInt("widget_fg_style", fg)
+            .putBoolean("widget_show_subtitle", showSub)
+            .apply()
+        ElamalWidgetReceiver.refreshAllWidgets(app)
+    }
+
+    fun openQuickAddForCalendarDay(dayOfMonth: Int, type: EntryType) {
+        val c = Calendar.getInstance().apply {
+            set(Calendar.YEAR, calendarYear)
+            set(Calendar.MONTH, calendarMonth)
+            set(Calendar.DAY_OF_MONTH, dayOfMonth)
+            set(Calendar.HOUR_OF_DAY, 12)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        prefillDialogDateMillis = c.timeInMillis
+        when (type) {
+            EntryType.HOURLY -> showManualHourlyDialog = true
+            EntryType.REMOTE -> showRemoteDialog = true
+            EntryType.CREDIT -> showCreditDialog = true
+        }
+    }
+
+    fun openShareDialog(
+        title: String,
+        targetEntries: List<WorkEntry>,
+        netTotal: Double,
+        carryOver: Double = 0.0,
+        targetSettlements: List<Settlement> = settlements
+    ) {
+        if (targetEntries.isEmpty() && carryOver == 0.0) {
+            showNotice("لا توجد سجلات للمشاركة في هذا النطاق")
+            return
+        }
+        pendingSharePayload = ShareDialogPayload(
+            title = title,
+            entries = targetEntries,
+            netTotal = netTotal,
+            carryOver = carryOver,
+            settlements = targetSettlements
+        )
+    }
+
+    fun updateShareIncludeDetails(include: Boolean) {
+        shareIncludeDetails = include
+        prefs.edit().putBoolean("share_include_details", include).apply()
+    }
+
+    fun copyTextToClipboard(text: String) {
+        runCatching {
+            val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("ملخص العمل", text))
+            showNotice("تم نسخ النص إلى الحافظة ✓")
+        }.onFailure {
+            showNotice("تعذر نسخ النص")
+        }
+    }
+
+    fun sharePlainTextIntent(context: Context, text: String, chooserTitle: String = "مشاركة الملخص") {
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(Intent.createChooser(sendIntent, chooserTitle).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
     }
 
     fun updateCurrencySymbol(newSymbol: String) {
@@ -288,10 +388,14 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         showNotice("تم تحديث وقت بداية الجلسة الجارية ✓")
     }
 
-    fun completeClockOut(breakMin: Int, note: String) {
+    fun completeClockOut(breakMin: Int, note: String, customEndMillis: Long = System.currentTimeMillis()) {
         val start = activeClockIn
-        val end = System.currentTimeMillis()
+        val end = customEndMillis
         if (start <= 0L) return
+        if (end <= start) {
+            showNotice("⚠️ وقت الخروج يجب أن يكون بعد وقت الدخول!")
+            return
+        }
         val pay = ElamalUtils.calculateHourlyPay(start, end, breakMin, hourlyRate)
         viewModelScope.launch {
             dao.insertEntry(
@@ -339,6 +443,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
                 )
             )
             showManualHourlyDialog = false
+            prefillDialogDateMillis = null
             showNotice("تمت إضافة سجل الساعات ✓")
             scheduleSmartBackupDebounced()
         }
@@ -371,11 +476,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Smart same-day Wi-Fi sessions merge:
-     * Combines multiple pending Wi-Fi sessions from the same day into a single work shift
-     * and automatically calculates the disconnection gaps as breakMinutes!
-     */
     fun mergeAndApproveDayWifiSessions(daySessions: List<WifiSession>, forceIgnoreOverlap: Boolean = false) {
         if (daySessions.size < 2) return
         val sorted = daySessions.sortedBy { it.startTime }
@@ -447,6 +547,7 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             )
             showRemoteDialog = false
             showCreditDialog = false
+            prefillDialogDateMillis = null
             showNotice("تمت إضافة السجل للدفتر ✓")
             scheduleSmartBackupDebounced()
         }
@@ -619,10 +720,11 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         title: String,
         reportEntries: List<WorkEntry>,
         reportSettlements: List<Settlement>,
-        carryOver: Double = 0.0
+        carryOver: Double = 0.0,
+        includeDetails: Boolean = true
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            PdfReportGenerator.generateAndSharePdf(app, title, reportEntries, reportSettlements, pdfDarkMode, carryOver)
+            PdfReportGenerator.generateAndSharePdf(app, title, reportEntries, reportSettlements, pdfDarkMode, carryOver, includeDetails)
         }
     }
 

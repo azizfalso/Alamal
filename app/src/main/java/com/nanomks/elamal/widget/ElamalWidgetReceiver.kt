@@ -9,7 +9,9 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
+import android.view.View
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import com.nanomks.elamal.R
@@ -220,21 +222,56 @@ class ElamalWidgetReceiver : AppWidgetProvider() {
             val enabled = prefs.getBoolean("widget_enabled", true)
             val activeStart = prefs.getLong("active_clock_in", 0L)
             val firstTap = prefs.getLong("widget_first_tap", 0L)
+            val bgStyle = prefs.getInt("widget_bg_style", 0) // 0=Auto, 1=Glass, 2=Transparent, 3=Dark
+            val fgStyle = prefs.getInt("widget_fg_style", 0) // 0=Auto, 1=White, 2=Black
+            val showSubtitle = prefs.getBoolean("widget_show_subtitle", true)
             val now = System.currentTimeMillis()
+            val sysNight = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 
             val views = RemoteViews(context.packageName, R.layout.widget_elamal)
-            if (!enabled) {
-                views.setInt(R.id.widget_root, "setBackgroundColor", Color.parseColor("#64748B"))
-                views.setTextViewText(R.id.widget_status, "معطّل")
-            } else if (now - firstTap <= 60_000L) {
-                views.setInt(R.id.widget_root, "setBackgroundColor", Color.parseColor("#D97706"))
-                views.setTextViewText(R.id.widget_status, if (activeStart == 0L) "اضغط مجدداً لتأكيد الدخول (60ث)" else "اضغط مجدداً لتأكيد الخروج (60ث)")
-            } else if (activeStart > 0L) {
-                views.setInt(R.id.widget_root, "setBackgroundColor", Color.parseColor("#059669"))
-                views.setTextViewText(R.id.widget_status, "دخول جارٍ.. اضغط للخروج")
-            } else {
-                views.setInt(R.id.widget_root, "setBackgroundColor", Color.parseColor("#0F172A"))
-                views.setTextViewText(R.id.widget_status, "اضغط لتسجيل الدخول")
+            views.setViewVisibility(R.id.widget_title, if (showSubtitle) View.VISIBLE else View.GONE)
+
+            val isArmed = enabled && (now - firstTap <= 60_000L)
+            val bgColor = when {
+                !enabled -> Color.parseColor("#64748B")
+                isArmed -> Color.parseColor("#D97706")
+                activeStart > 0L -> Color.parseColor("#059669")
+                else -> when (bgStyle) {
+                    1 -> if (sysNight) Color.parseColor("#770F172A") else Color.parseColor("#88FFFFFF")
+                    2 -> Color.TRANSPARENT
+                    3 -> Color.parseColor("#0F172A")
+                    else -> if (sysNight) Color.parseColor("#151F32") else Color.parseColor("#F8FAFC")
+                }
+            }
+
+            val isLightBg = !isArmed && activeStart == 0L && enabled && (
+                    (bgStyle == 0 && !sysNight) || (bgStyle == 1 && !sysNight)
+                    )
+            val mainTextColor = when {
+                !enabled || isArmed || activeStart > 0L -> Color.WHITE
+                fgStyle == 1 -> Color.WHITE
+                fgStyle == 2 -> Color.parseColor("#0F172A")
+                else -> if (isLightBg) Color.parseColor("#0F172A") else Color.WHITE
+            }
+            val subTextColor = when {
+                !enabled || isArmed || activeStart > 0L -> Color.parseColor("#E2E8F0")
+                fgStyle == 1 -> Color.parseColor("#CBD5E1")
+                fgStyle == 2 -> Color.parseColor("#475569")
+                else -> if (isLightBg) Color.parseColor("#475569") else Color.parseColor("#94A3B8")
+            }
+
+            views.setInt(R.id.widget_root, "setBackgroundColor", bgColor)
+            views.setTextColor(R.id.widget_status, mainTextColor)
+            views.setTextColor(R.id.widget_title, subTextColor)
+
+            when {
+                !enabled -> views.setTextViewText(R.id.widget_status, "معطّل")
+                isArmed -> views.setTextViewText(
+                    R.id.widget_status,
+                    if (activeStart == 0L) "اضغط مجدداً لتأكيد الدخول (60ث)" else "اضغط مجدداً لتأكيد الخروج (60ث)"
+                )
+                activeStart > 0L -> views.setTextViewText(R.id.widget_status, "دخول جارٍ.. اضغط للخروج")
+                else -> views.setTextViewText(R.id.widget_status, "اضغط لتسجيل الدخول")
             }
 
             val clickIntent = Intent(context, ElamalWidgetReceiver::class.java).apply {
