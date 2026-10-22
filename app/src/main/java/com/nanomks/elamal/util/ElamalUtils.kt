@@ -41,9 +41,6 @@ object ElamalUtils {
     private var lastDetectedSsidCache: String? = null
 
     @Volatile
-    var useArabicDigits: Boolean = false
-
-    @Volatile
     var currencySymbol: String = "DH"
 
     private val ARABIC_DIACRITICS_REGEX = Regex("[\\u064B-\\u065F\\u0670\\u0640]")
@@ -59,10 +56,6 @@ object ElamalUtils {
         "com.nanomks.elamal.LauncherSlate" to "#475569"
     )
 
-    /**
-     * Fast Arabic text normalization for search:
-     * Strips diacritics/tatweel, unifies Alef variants (أ/إ/آ/ٱ -> ا), Teh Marbuta (ة -> ه), and Alef Maksura (ى -> ي).
-     */
     fun normalizeArabicSearch(text: String): String {
         if (text.isBlank()) return ""
         return text.lowercase(Locale.ROOT)
@@ -73,9 +66,6 @@ object ElamalUtils {
             .trim()
     }
 
-    /**
-     * Prevents CSV Formula Injection when opened in Excel/Sheets by prefixing dangerous leading characters.
-     */
     fun sanitizeCsvCell(raw: String): String {
         val clean = raw.replace("\n", " ").replace("\r", " ").trim()
         val safe = if (clean.isNotEmpty() && clean[0] in charArrayOf('=', '+', '-', '@', '\t', '\r') && clean.toDoubleOrNull() == null) {
@@ -86,21 +76,12 @@ object ElamalUtils {
         return "\"" + safe.replace("\"", "\"\"") + "\""
     }
 
-    fun localizeDigits(input: String): String {
-        if (!useArabicDigits) return input
-        val arabicDigits = charArrayOf('٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩')
-        val sb = StringBuilder(input.length)
-        for (ch in input) {
-            if (ch in '0'..'9') {
-                sb.append(arabicDigits[ch - '0'])
-            } else {
-                sb.append(ch)
-            }
-        }
-        return sb.toString()
-    }
+    /**
+     * Kept as an identity function for compatibility: always returns standard Western digits (0123456789).
+     */
+    fun localizeDigits(input: String): String = input
 
-    fun ltrIsolate(text: String): String = "\u2066${localizeDigits(text)}\u2069"
+    fun ltrIsolate(text: String): String = "\u2066$text\u2069"
 
     fun findClosestIconAlias(hexColor: String): String {
         val targetColor = runCatching { Color.parseColor(hexColor) }.getOrDefault(Color.parseColor("#059669"))
@@ -160,13 +141,12 @@ object ElamalUtils {
         val safeMin = minutesTotal.coerceAtLeast(0)
         val h = safeMin / 60
         val m = safeMin % 60
-        return localizeDigits("${h} س ${m} د")
+        return "${h} س ${m} د"
     }
 
     fun formatMoney(amount: Double): String {
         val cur = currencySymbol.trim().let { if (it.isEmpty()) "" else " $it" }
-        val raw = String.format(Locale.US, "%.2f%s", amount, cur)
-        return localizeDigits(raw)
+        return String.format(Locale.US, "%.2f%s", amount, cur)
     }
 
     fun getArabicDayName(millis: Long): String {
@@ -184,8 +164,7 @@ object ElamalUtils {
     }
 
     fun formatDate(millis: Long): String {
-        val raw = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
-        return localizeDigits(raw)
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
     }
 
     fun formatDayAndDate(millis: Long): String {
@@ -195,13 +174,11 @@ object ElamalUtils {
     }
 
     fun formatTime(millis: Long): String {
-        val raw = SimpleDateFormat("HH:mm", Locale.US).format(Date(millis))
-        return localizeDigits(raw)
+        return SimpleDateFormat("HH:mm", Locale.US).format(Date(millis))
     }
 
     fun formatDateTime(millis: Long): String {
-        val raw = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(millis))
-        return localizeDigits(raw)
+        return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(millis))
     }
 
     fun getWeekMondayStartMillis(millis: Long): Long {
@@ -239,9 +216,6 @@ object ElamalUtils {
         return if (d != null && pos.index == normalized.length) d.time else null
     }
 
-    /**
-     * Checks Wi-Fi connectivity using only ACCESS_NETWORK_STATE (no location permission needed).
-     */
     fun isWifiConnectedFast(context: Context): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
         val activeNet = cm.activeNetwork ?: return false
@@ -249,11 +223,6 @@ object ElamalUtils {
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
-    /**
-     * Location-free Wi-Fi detection:
-     * - When `wifi_use_root_su` is enabled, reads the exact SSID via root (`su`) without GPS/Location permission.
-     * - When `wifi_use_root_su` is disabled, tracks general Wi-Fi presence under "واي فاي العمل" without requiring SSID or Location permission.
-     */
     fun getConnectedSsid(context: Context? = null, forceFresh: Boolean = false): String? {
         if (context != null && !isWifiConnectedFast(context)) {
             lastDetectedSsidCache = null
@@ -547,9 +516,6 @@ object ElamalUtils {
         alarmManager.cancel(pi)
     }
 
-    /**
-     * Builds WhatsApp/Text summary with optional day-by-day details (`includeDetails`).
-     */
     fun buildWhatsappFormattedText(
         entries: List<WorkEntry>,
         totalNet: Double,
@@ -579,7 +545,7 @@ object ElamalUtils {
             }
         }
 
-        sb.append("📆 *أيام العمل:* ${localizeDigits("$activeDays")}\n")
+        sb.append("📆 *أيام العمل:* $activeDays\n")
         sb.append("⏱ *مجموع الساعات:* ${formatDurationArabic(totalMins)}\n")
         sb.append("💼 *أجور الساعات:* ${formatMoney(roundMoney(hourlyMoney))}\n")
         if (remoteMoney > 0.0) {

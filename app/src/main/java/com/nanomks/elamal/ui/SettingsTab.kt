@@ -25,6 +25,8 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,6 +43,108 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.*
+
+/**
+ * Unified, harmonious Settings Switch Card:
+ * Ensures every toggle row has the exact same container style, internal padding,
+ * `Modifier.weight(1f)` on the text column so text NEVER collides with the Switch,
+ * and clickable row behavior.
+ */
+@Composable
+private fun UnifiedSettingSwitchRow(
+    title: String,
+    subtitle: String? = null,
+    checked: Boolean,
+    accentColor: Color,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onCheckedChange(!checked) }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.5f.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 18.sp
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        fontSize = 11.5f.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = accentColor
+                )
+            )
+        }
+    }
+}
+
+/**
+ * Harmonious, legible Segmented Choice Button used for Theme Mode, Widget Background, and Widget Text Color.
+ * Prevents cramped tiny fonts or truncated labels.
+ */
+@Composable
+private fun ChoiceOptionButton(
+    label: String,
+    selected: Boolean,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier
+            .height(42.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) accentColor else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) accentColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+        )
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        ) {
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
 
 @Composable
 private fun ExpandableCategoryCard(
@@ -81,11 +185,12 @@ private fun ExpandableCategoryCard(
                     ) {
                         Icon(icon, contentDescription = title, tint = accentColor, modifier = Modifier.size(20.dp))
                     }
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
-                        Text(subtitle, fontSize = 11.5f.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        Text(subtitle, fontSize = 11.5f.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
+                Spacer(modifier = Modifier.width(8.dp))
                 Icon(
                     imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = "طي/توسيع",
@@ -165,7 +270,9 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 22.dp)
     ) {
-        // CATEGORY 0: المظهر والتخصيص (مع معاينة الخط الحية ومنتقي الألوان التفاعلي)
+        // =========================================================================
+        // CATEGORY 0: المظهر والتخصيص
+        // =========================================================================
         item {
             ExpandableCategoryCard(
                 title = "قسم المظهر والتخصيص",
@@ -175,29 +282,32 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                 isExpanded = expandedCatIndex == 0,
                 onToggle = { expandedCatIndex = if (expandedCatIndex == 0) -1 else 0 }
             ) {
-                Text("وضع الإضاءة للتطبيق:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("وضع الإضاءة للتطبيق:", fontWeight = FontWeight.Bold, fontSize = 13.5f.sp)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
+                    ChoiceOptionButton(
+                        label = "تلقائي",
                         selected = themeMode == 0,
-                        onClick = { themeMode = 0; prefs.edit().putInt("theme_mode", 0).apply() },
-                        label = { Text("تلقائي", fontSize = 12.sp) },
-                        modifier = Modifier.weight(1f)
+                        accentColor = primaryCustom,
+                        modifier = Modifier.weight(1f),
+                        onClick = { themeMode = 0; prefs.edit().putInt("theme_mode", 0).apply() }
                     )
-                    FilterChip(
+                    ChoiceOptionButton(
+                        label = "☀️ فاتح",
                         selected = themeMode == 1,
-                        onClick = { themeMode = 1; prefs.edit().putInt("theme_mode", 1).apply() },
-                        label = { Text("☀️ فاتح", fontSize = 12.sp) },
-                        modifier = Modifier.weight(1f)
+                        accentColor = primaryCustom,
+                        modifier = Modifier.weight(1f),
+                        onClick = { themeMode = 1; prefs.edit().putInt("theme_mode", 1).apply() }
                     )
-                    FilterChip(
+                    ChoiceOptionButton(
+                        label = "🌙 داكن",
                         selected = themeMode == 2,
-                        onClick = { themeMode = 2; prefs.edit().putInt("theme_mode", 2).apply() },
-                        label = { Text("🌙 داكن", fontSize = 12.sp) },
-                        modifier = Modifier.weight(1f)
+                        accentColor = primaryCustom,
+                        modifier = Modifier.weight(1f),
+                        onClick = { themeMode = 2; prefs.edit().putInt("theme_mode", 2).apply() }
                     )
                 }
 
-                Text("الألوان الكلاسيكية:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("الألوان الكلاسيكية:", fontWeight = FontWeight.Bold, fontSize = 13.5f.sp)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     mainColors.forEach { (hex, name) ->
                         val btnCol = Color(android.graphics.Color.parseColor(hex))
@@ -209,18 +319,18 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                                 .weight(1f)
                                 .height(42.dp)
                                 .then(
-                                    if (isSelected) Modifier.border(2.5.dp, colorScheme.onSurface, RoundedCornerShape(10.dp))
+                                    if (isSelected) Modifier.border(2.5.dp, colorScheme.onSurface, RoundedCornerShape(12.dp))
                                     else Modifier
                                 ),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 4.dp)
                         ) {
-                            Text(name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                            Text(name, fontSize = 12.5f.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
                         }
                     }
                 }
 
-                Text("الألوان الباردة الهادئة:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("الألوان الباردة الهادئة:", fontWeight = FontWeight.Bold, fontSize = 13.5f.sp)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     coldColors.chunked(2).forEach { pair ->
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -234,13 +344,13 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                                         .weight(1f)
                                         .height(42.dp)
                                         .then(
-                                            if (isSelected) Modifier.border(2.5.dp, colorScheme.onSurface, RoundedCornerShape(10.dp))
+                                            if (isSelected) Modifier.border(2.5.dp, colorScheme.onSurface, RoundedCornerShape(12.dp))
                                             else Modifier
                                         ),
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     contentPadding = PaddingValues(horizontal = 6.dp)
                                 ) {
-                                    Text(name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                                    Text(name, fontSize = 12.5f.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
                                 }
                             }
                         }
@@ -259,65 +369,44 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                             .background(primaryCustom)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("منتقي الألوان التفاعلي (${appColorHex})", fontWeight = FontWeight.Bold, fontSize = 12.5f.sp)
+                    Text("منتقي الألوان التفاعلي (${appColorHex})", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
 
-                Surface(
-                    color = colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("مزامنة أيقونة التطبيق مع لون التطبيق", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text(
-                                text = if (syncIconWithColor) "مفعّل: الأيقونة تتغير تلقائياً" else "متوقف: الأيقونة ثابتة",
-                                fontSize = 11.sp,
-                                color = colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = syncIconWithColor,
-                            onCheckedChange = { toggleSyncIconWithColor(it) }
-                        )
+                UnifiedSettingSwitchRow(
+                    title = "مزامنة أيقونة التطبيق مع لون التطبيق",
+                    subtitle = if (syncIconWithColor) "مفعّل: الأيقونة تتغير تلقائياً" else "متوقف: الأيقونة ثابتة",
+                    checked = syncIconWithColor,
+                    accentColor = primaryCustom,
+                    onCheckedChange = { toggleSyncIconWithColor(it) }
+                )
+
+                UnifiedSettingSwitchRow(
+                    title = "ألوان النظام التلقائية (Material You)",
+                    subtitle = "استخدام لوحة ألوان خلفية الهاتف في أندرويد 12+",
+                    checked = dynamicColor,
+                    accentColor = primaryCustom,
+                    onCheckedChange = {
+                        dynamicColor = it
+                        prefs.edit().putBoolean("dynamic_color", it).apply()
                     }
-                }
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("إظهار الأرقام بالأرقام العربية (٠١٢٣)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Switch(
-                        checked = useArabicDigits,
-                        onCheckedChange = { toggleArabicDigits(it) }
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("حجم الخط الشامل: ${(fontScale * 100).toInt()}%", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("حجم الخط الشامل: ${(fontScale * 100).toInt()}%", fontWeight = FontWeight.Bold, fontSize = 13.5f.sp)
                     if (fontScale != 1.0f) {
                         TextButton(onClick = {
                             fontScale = 1.0f
                             prefs.edit().putFloat("font_scale", 1.0f).apply()
                         }) {
-                            Text("الحجم الافتراضي (100%)", fontSize = 11.5f.sp)
+                            Text("الحجم الافتراضي (100%)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
 
-                // Live Font Size Preview Card!
                 EntryRowCard(
                     item = samplePreviewEntry,
                     fontScale = fontScale,
@@ -333,100 +422,116 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                     },
                     valueRange = 0.85f..1.30f
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("ألوان النظام التلقائية (Material You)", fontSize = 13.sp)
-                    Switch(
-                        checked = dynamicColor,
-                        onCheckedChange = {
-                            dynamicColor = it
-                            prefs.edit().putBoolean("dynamic_color", it).apply()
-                        }
-                    )
-                }
             }
         }
 
-        // CATEGORY 1: قسم تخصيص مظهر الودجت (الجديد!)
+        // =========================================================================
+        // CATEGORY 1: قسم ودجت الشاشة الرئيسية
+        // =========================================================================
         item {
+            val widgetAccent = Color(0xFF0D9488)
             ExpandableCategoryCard(
                 title = "قسم ودجت الشاشة الرئيسية",
                 subtitle = "تخصيص خلفية الودجت، لون النص، والتأكيد المزدوج",
                 icon = Icons.Default.Widgets,
-                accentColor = Color(0xFF0D9488),
+                accentColor = widgetAccent,
                 isExpanded = expandedCatIndex == 1,
                 onToggle = { expandedCatIndex = if (expandedCatIndex == 1) -1 else 1 }
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("تفعيل ودجت الشاشة الرئيسية", fontSize = 13.5f.sp, fontWeight = FontWeight.Bold)
-                        Text("عند الإيقاف يظهر «معطّل» ولا يستجيب للمس", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
+                UnifiedSettingSwitchRow(
+                    title = "تفعيل ودجت الشاشة الرئيسية",
+                    subtitle = "عند الإيقاف يظهر «معطّل» ولا يستجيب للمس",
+                    checked = widgetEnabled,
+                    accentColor = widgetAccent,
+                    onCheckedChange = {
+                        widgetEnabled = it
+                        prefs.edit().putBoolean("widget_enabled", it).apply()
+                        ElamalWidgetReceiver.refreshAllWidgets(context)
                     }
-                    Switch(
-                        checked = widgetEnabled,
-                        onCheckedChange = {
-                            widgetEnabled = it
-                            prefs.edit().putBoolean("widget_enabled", it).apply()
-                            ElamalWidgetReceiver.refreshAllWidgets(context)
-                        }
-                    )
-                }
+                )
 
-                Text("خلفية الودجت:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    val bgOptions = listOf(0 to "تلقائي", 1 to "شفاف", 2 to "بلا خلفية", 3 to "داكن")
-                    bgOptions.forEach { (idx, lbl) ->
-                        FilterChip(
-                            selected = widgetBgStyle == idx,
-                            onClick = { updateWidgetAppearance(bg = idx) },
-                            label = { Text(lbl, fontSize = 11.sp, maxLines = 1) },
-                            modifier = Modifier.weight(1f)
+                Text("خلفية الودجت:", fontWeight = FontWeight.Bold, fontSize = 13.5f.sp)
+                // 2x2 grid for widget background options so font is large, clear, and symmetrical
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ChoiceOptionButton(
+                            label = "تلقائي (حسب الوضع)",
+                            selected = widgetBgStyle == 0,
+                            accentColor = widgetAccent,
+                            modifier = Modifier.weight(1f),
+                            onClick = { updateWidgetAppearance(bg = 0) }
+                        )
+                        ChoiceOptionButton(
+                            label = "شفاف زجاجي",
+                            selected = widgetBgStyle == 1,
+                            accentColor = widgetAccent,
+                            modifier = Modifier.weight(1f),
+                            onClick = { updateWidgetAppearance(bg = 1) }
+                        )
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ChoiceOptionButton(
+                            label = "بلا خلفية",
+                            selected = widgetBgStyle == 2,
+                            accentColor = widgetAccent,
+                            modifier = Modifier.weight(1f),
+                            onClick = { updateWidgetAppearance(bg = 2) }
+                        )
+                        ChoiceOptionButton(
+                            label = "داكن دائماً",
+                            selected = widgetBgStyle == 3,
+                            accentColor = widgetAccent,
+                            modifier = Modifier.weight(1f),
+                            onClick = { updateWidgetAppearance(bg = 3) }
                         )
                     }
                 }
 
-                Text("لون نص الودجت:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("لون نص الودجت:", fontWeight = FontWeight.Bold, fontSize = 13.5f.sp)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val fgOptions = listOf(0 to "تلقائي حسب الخلفية", 1 to "أبيض دائماً", 2 to "أسود دائماً")
-                    fgOptions.forEach { (idx, lbl) ->
-                        FilterChip(
-                            selected = widgetFgStyle == idx,
-                            onClick = { updateWidgetAppearance(fg = idx) },
-                            label = { Text(lbl, fontSize = 11.sp, maxLines = 1) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("إظهار العنوان الفرعي أعلى حالة الودجت", fontSize = 13.sp)
-                    Switch(
-                        checked = widgetShowSubtitle,
-                        onCheckedChange = { updateWidgetAppearance(showSub = it) }
+                    ChoiceOptionButton(
+                        label = "تلقائي",
+                        selected = widgetFgStyle == 0,
+                        accentColor = widgetAccent,
+                        modifier = Modifier.weight(1f),
+                        onClick = { updateWidgetAppearance(fg = 0) }
+                    )
+                    ChoiceOptionButton(
+                        label = "أبيض دائماً",
+                        selected = widgetFgStyle == 1,
+                        accentColor = widgetAccent,
+                        modifier = Modifier.weight(1f),
+                        onClick = { updateWidgetAppearance(fg = 1) }
+                    )
+                    ChoiceOptionButton(
+                        label = "أسود دائماً",
+                        selected = widgetFgStyle == 2,
+                        accentColor = widgetAccent,
+                        modifier = Modifier.weight(1f),
+                        onClick = { updateWidgetAppearance(fg = 2) }
                     )
                 }
+
+                UnifiedSettingSwitchRow(
+                    title = "إظهار العنوان الفرعي أعلى حالة الودجت",
+                    subtitle = "يعرض عبارة «العمل • تتبع الساعات» فوق زر الحالة",
+                    checked = widgetShowSubtitle,
+                    accentColor = widgetAccent,
+                    onCheckedChange = { updateWidgetAppearance(showSub = it) }
+                )
             }
         }
 
+        // =========================================================================
         // CATEGORY 2: قسم العمل والحسابات
+        // =========================================================================
         item {
+            val workAccent = Color(0xFF059669)
             ExpandableCategoryCard(
                 title = "قسم العمل والحسابات",
                 subtitle = "العملة، سعر الساعة، وتنبيه نسيان الخروج",
                 icon = Icons.Default.Calculate,
-                accentColor = Color(0xFF059669),
+                accentColor = workAccent,
                 isExpanded = expandedCatIndex == 2,
                 onToggle = { expandedCatIndex = if (expandedCatIndex == 2) -1 else 2 }
             ) {
@@ -469,7 +574,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                     )
                 }
 
-                Text("تنبيه نسيان الخروج: بعد $forgotAlarmHours ساعة (0 للإيقاف)", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                Text("تنبيه نسيان الخروج: بعد $forgotAlarmHours ساعة (0 للإيقاف)", fontWeight = FontWeight.SemiBold, fontSize = 13.5f.sp)
                 Slider(
                     value = forgotAlarmHours.toFloat(),
                     onValueChange = {
@@ -479,87 +584,68 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                     valueRange = 0f..48f
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("إظهار شريط البحث والفلتر في الدفتر", fontSize = 13.sp)
-                    Switch(
-                        checked = searchFilterEnabled,
-                        onCheckedChange = {
-                            searchFilterEnabled = it
-                            prefs.edit().putBoolean("search_filter_enabled", it).apply()
-                        }
-                    )
-                }
+                UnifiedSettingSwitchRow(
+                    title = "إظهار شريط البحث والفلتر في الدفتر",
+                    subtitle = "يسمح بالبحث الفوري في الملاحظات وتصفية السجلات",
+                    checked = searchFilterEnabled,
+                    accentColor = workAccent,
+                    onCheckedChange = {
+                        searchFilterEnabled = it
+                        prefs.edit().putBoolean("search_filter_enabled", it).apply()
+                    }
+                )
             }
         }
 
-        // CATEGORY 3: قسم التتبع الذكي والواي فاي (بدون صلاحية الموقع)
+        // =========================================================================
+        // CATEGORY 3: قسم التتبع الذكي والواي فاي
+        // =========================================================================
         item {
+            val wifiAccent = Color(0xFF2563EB)
             ExpandableCategoryCard(
                 title = "قسم التتبع الذكي والواي فاي",
                 subtitle = "يعمل بدون صلاحية الموقع (بالروت أو التتبع العام)",
                 icon = Icons.Default.Wifi,
-                accentColor = Color(0xFF2563EB),
+                accentColor = wifiAccent,
                 isExpanded = expandedCatIndex == 3,
                 onToggle = { expandedCatIndex = if (expandedCatIndex == 3) -1 else 3 }
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("تفعيل تتبع شبكات العمل تلقائياً", fontWeight = FontWeight.Bold, fontSize = 13.5f.sp)
-                    Switch(
-                        checked = rootWifiEnabled,
+                UnifiedSettingSwitchRow(
+                    title = "تفعيل تتبع شبكات العمل تلقائياً",
+                    subtitle = "يرصد فترات الاتصال بالواي فاي ويقترحها في الدفتر",
+                    checked = rootWifiEnabled,
+                    accentColor = wifiAccent,
+                    onCheckedChange = {
+                        rootWifiEnabled = it
+                        prefs.edit().putBoolean("root_wifi_enabled", it).apply()
+                        ElamalUtils.syncPeriodicWifiPollSchedule(context)
+                    }
+                )
+
+                if (rootWifiEnabled) {
+                    UnifiedSettingSwitchRow(
+                        title = "استخدام أوامر الروت (su) لمعرفة اسم الشبكة",
+                        subtitle = "عند إيقافه: يسجّل فترات اتصال الواي فاي بدون روت وبدون صلاحية الموقع",
+                        checked = wifiUseRootSu,
+                        accentColor = wifiAccent,
                         onCheckedChange = {
-                            rootWifiEnabled = it
-                            prefs.edit().putBoolean("root_wifi_enabled", it).apply()
+                            wifiUseRootSu = it
+                            prefs.edit().putBoolean("wifi_use_root_su", it).apply()
                             ElamalUtils.syncPeriodicWifiPollSchedule(context)
                         }
                     )
-                }
 
-                if (rootWifiEnabled) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("استخدام أوامر الروت (su) لمعرفة اسم الشبكة", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text("عند إيقافه: يسجّل فترات اتصال الواي فاي بدون روت وبدون صلاحية الموقع", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
+                    UnifiedSettingSwitchRow(
+                        title = "منبه موقظ (RTC_WAKEUP) للفحص الدوري",
+                        subtitle = "يمنع ضياع جلسات الواي فاي في وضع التوفير العميق Doze",
+                        checked = wifiWakeAlarm,
+                        accentColor = wifiAccent,
+                        onCheckedChange = {
+                            wifiWakeAlarm = it
+                            prefs.edit().putBoolean("wifi_wake_alarm", it).apply()
+                            ElamalUtils.syncPeriodicWifiPollSchedule(context)
                         }
-                        Switch(
-                            checked = wifiUseRootSu,
-                            onCheckedChange = {
-                                wifiUseRootSu = it
-                                prefs.edit().putBoolean("wifi_use_root_su", it).apply()
-                                ElamalUtils.syncPeriodicWifiPollSchedule(context)
-                            }
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("منبه موقظ (RTC_WAKEUP) للفحص الدوري", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text("يمنع ضياع جلسات الواي فاي في وضع التوفير العميق Doze", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
-                        }
-                        Switch(
-                            checked = wifiWakeAlarm,
-                            onCheckedChange = {
-                                wifiWakeAlarm = it
-                                prefs.edit().putBoolean("wifi_wake_alarm", it).apply()
-                                ElamalUtils.syncPeriodicWifiPollSchedule(context)
-                            }
-                        )
-                    }
+                    )
 
                     if (wifiUseRootSu) {
                         Row(
@@ -600,7 +686,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                                 modifier = Modifier.weight(1f).height(42.dp),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Text("فحص الشبكة الآن", fontSize = 12.sp)
+                                Text("فحص الشبكة الآن", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
 
                             OutlinedButton(
@@ -620,7 +706,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                                 modifier = Modifier.weight(1f).height(42.dp),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Text("إضافة الشبكة الحالية", fontSize = 12.sp)
+                                Text("إضافة الشبكة الحالية", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -674,7 +760,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                                         }
                                     },
                                     shape = RoundedCornerShape(12.dp)
-                                ) { Text("إضافة") }
+                                ) { Text("إضافة", fontWeight = FontWeight.Bold) }
                             }
                         }
                     }
@@ -682,85 +768,89 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
             }
         }
 
+        // =========================================================================
         // CATEGORY 4: قسم الأمان والخصوصية
+        // =========================================================================
         item {
+            val secAccent = Color(0xFF7C3AED)
             ExpandableCategoryCard(
                 title = "قسم الأمان والخصوصية",
                 subtitle = "حماية التطبيق برمز PIN، البصمة، وحجب لقطة الشاشة",
                 icon = Icons.Default.Security,
-                accentColor = Color(0xFF7C3AED),
+                accentColor = secAccent,
                 isExpanded = expandedCatIndex == 4,
                 onToggle = { expandedCatIndex = if (expandedCatIndex == 4) -1 else 4 }
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    color = colorScheme.surfaceVariant.copy(alpha = 0.42f),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (savedPin.isBlank()) "قفل التطبيق غير مفعّل حالياً" else "قفل التطبيق مفعّل ومحمي ✓",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.5f.sp,
-                            color = if (savedPin.isBlank()) colorScheme.onSurfaceVariant else Color(0xFF059669)
-                        )
-                        Text("يقفل تلقائياً بعد 60 ثانية بالخلفية", fontSize = 11.5f.sp, color = colorScheme.onSurfaceVariant)
-                    }
-                    Button(
-                        onClick = { showPinSetupDialog = true },
-                        shape = RoundedCornerShape(12.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Dialpad, contentDescription = "إدارة الرمز", modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (savedPin.isBlank()) "تعيين رمز" else "إدارة الرمز", fontSize = 12.sp)
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = if (savedPin.isBlank()) "قفل التطبيق غير مفعّل حالياً" else "قفل التطبيق مفعّل ومحمي ✓",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5f.sp,
+                                color = if (savedPin.isBlank()) colorScheme.onSurface else Color(0xFF059669)
+                            )
+                            Text("يقفل تلقائياً بعد 60 ثانية بالخلفية", fontSize = 11.5f.sp, color = colorScheme.onSurfaceVariant)
+                        }
+                        Button(
+                            onClick = { showPinSetupDialog = true },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = secAccent)
+                        ) {
+                            Icon(Icons.Default.Dialpad, contentDescription = "إدارة الرمز", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (savedPin.isBlank()) "تعيين رمز" else "إدارة الرمز", fontSize = 12.5f.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("حجب الأرقام في التطبيقات الأخيرة (FLAG_SECURE)", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text("يمنع ظهور المبالغ في معاينة الشاشات ولقطات الشاشة", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
+                UnifiedSettingSwitchRow(
+                    title = "حجب الأرقام في التطبيقات الأخيرة",
+                    subtitle = "تفعيل حماية الشاشة (FLAG_SECURE) لمنع المعاينة واللقطات",
+                    checked = flagSecureEnabled,
+                    accentColor = secAccent,
+                    onCheckedChange = { enabled ->
+                        flagSecureEnabled = enabled
+                        prefs.edit().putBoolean("flag_secure_enabled", enabled).apply()
+                        (activity as? MainActivity)?.applyFlagSecureFromPrefs()
                     }
-                    Switch(
-                        checked = flagSecureEnabled,
-                        onCheckedChange = { enabled ->
-                            flagSecureEnabled = enabled
-                            prefs.edit().putBoolean("flag_secure_enabled", enabled).apply()
-                            (activity as? MainActivity)?.applyFlagSecureFromPrefs()
-                        }
-                    )
-                }
+                )
             }
         }
 
+        // =========================================================================
         // CATEGORY 5: قسم النسخ الاحتياطي والاستعادة
+        // =========================================================================
         item {
+            val bkAccent = Color(0xFFD97706)
             ExpandableCategoryCard(
                 title = "قسم النسخ الاحتياطي والاستعادة",
                 subtitle = "الحفظ التلقائي، النسخ اليومية، وتشفير AES-256",
                 icon = Icons.Default.CloudSync,
-                accentColor = Color(0xFFD97706),
+                accentColor = bkAccent,
                 isExpanded = expandedCatIndex == 5,
                 onToggle = { expandedCatIndex = if (expandedCatIndex == 5) -1 else 5 }
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("تشفير النسخ الاحتياطية بكلمة مرور (AES-256)", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Switch(
-                        checked = encEnabled,
-                        onCheckedChange = {
-                            encEnabled = it
-                            prefs.edit().putBoolean("backup_encrypt_enabled", it).apply()
-                        }
-                    )
-                }
+                UnifiedSettingSwitchRow(
+                    title = "تشفير النسخ الاحتياطية بكلمة مرور",
+                    subtitle = "تشفير قوي بمعيار AES-256-GCM مع حماية Keystore",
+                    checked = encEnabled,
+                    accentColor = bkAccent,
+                    onCheckedChange = {
+                        encEnabled = it
+                        prefs.edit().putBoolean("backup_encrypt_enabled", it).apply()
+                    }
+                )
 
                 if (encEnabled) {
                     if (keystoreError) {
@@ -795,7 +885,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                 }
 
                 Text(
-                    text = if (backupAgeHours >= 0) "⏱ عمر آخر نسخة احتياطية: منذ ${ElamalUtils.localizeDigits("$backupAgeHours")} ساعة"
+                    text = if (backupAgeHours >= 0) "⏱ عمر آخر نسخة احتياطية: منذ $backupAgeHours ساعة"
                     else "⚠️ تذكير: لم يتم أخذ نسخة احتياطية بعد!",
                     fontSize = 12.5f.sp,
                     fontWeight = FontWeight.Bold,
@@ -809,7 +899,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                 ) {
                     Icon(Icons.Default.FolderOpen, contentDescription = "اختيار مجلد النسخ")
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (backupUriStr.isBlank()) "اختيار مجلد النسخ الاحتياطي (SAF)" else "تغيير مجلد النسخ الاحتياطي ✓")
+                    Text(if (backupUriStr.isBlank()) "اختيار مجلد النسخ الاحتياطي (SAF)" else "تغيير مجلد النسخ الاحتياطي ✓", fontWeight = FontWeight.Bold)
                 }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -824,45 +914,45 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                         },
                         modifier = Modifier.weight(1f).height(44.dp),
                         shape = RoundedCornerShape(10.dp)
-                    ) { Text("نسخ يدوي الآن", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                    ) { Text("نسخ يدوي الآن", fontSize = 12.5f.sp, fontWeight = FontWeight.Bold) }
 
                     OutlinedButton(
                         onClick = { confirmRestoreFileName = "elamal_auto_backup.json" },
                         modifier = Modifier.weight(1f).height(44.dp),
                         shape = RoundedCornerShape(10.dp)
-                    ) { Text("استعادة التلقائية", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                    ) { Text("استعادة التلقائية", fontSize = 12.5f.sp, fontWeight = FontWeight.Bold) }
                 }
 
                 if (backupFilesList.isNotEmpty()) {
                     HorizontalDivider(color = colorScheme.onSurface.copy(alpha = 0.08f))
-                    Text("النسخ المتوفرة في المجلد (${ElamalUtils.localizeDigits("${backupFilesList.size}")}):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("النسخ المتوفرة في المجلد (${backupFilesList.size}):", fontWeight = FontWeight.Bold, fontSize = 13.5f.sp)
                     for (bf in backupFilesList.take(10)) {
                         Surface(
                             color = colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = BackupSafManager.formatBackupFileLabel(bf),
-                                        fontSize = 12.sp,
+                                        fontSize = 12.5f.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = colorScheme.onSurface
                                     )
                                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                                        Text(bf, fontSize = 10.sp, color = colorScheme.onSurfaceVariant)
+                                        Text(bf, fontSize = 10.5f.sp, color = colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     TextButton(onClick = { confirmRestoreFileName = bf }) {
-                                        Text("استعادة", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("استعادة", fontSize = 12.5f.sp, fontWeight = FontWeight.Bold)
                                     }
                                     TextButton(onClick = {
                                         val ok = BackupSafManager.deleteBackupFile(context, bf)
@@ -871,7 +961,7 @@ fun AppState.SettingsTab(activity: FragmentActivity? = null) {
                                             showNotice("تم حذف النسخة بنجاح")
                                         }
                                     }) {
-                                        Text("حذف", fontSize = 12.sp, color = Color(0xFFEF4444))
+                                        Text("حذف", fontSize = 12.5f.sp, color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }

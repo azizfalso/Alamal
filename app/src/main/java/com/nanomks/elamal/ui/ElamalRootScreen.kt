@@ -58,7 +58,6 @@ fun AppState.RootContent(activity: FragmentActivity) {
     sysDark = isSystemInDarkTheme()
     primaryCustom = runCatching { Color(android.graphics.Color.parseColor(appColorHex)) }.getOrDefault(Color(0xFF059669))
 
-    // Auto-lock observer: locks the app if left in background for >= 60 seconds using monotonic clock
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -241,7 +240,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                             shape = RoundedCornerShape(6.dp)
                                         ) {
                                             Text(
-                                                text = "v4.7",
+                                                text = "v4.8",
                                                 fontSize = 10.sp,
                                                 color = primaryCustom,
                                                 fontWeight = FontWeight.Bold,
@@ -274,20 +273,13 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                 }
                             }
                             if (deletedEntries.isNotEmpty()) {
+                                // Clean trash icon without the red notification badge
                                 IconButton(onClick = { showTrashBinDialog = true }) {
-                                    BadgedBox(
-                                        badge = {
-                                            Badge(containerColor = Color(0xFFEF4444), contentColor = Color.White) {
-                                                Text(ElamalUtils.localizeDigits("${deletedEntries.size}"))
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            Icons.Default.DeleteSweep,
-                                            contentDescription = stringResource(R.string.trash_bin_title),
-                                            tint = colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                    Icon(
+                                        Icons.Default.DeleteSweep,
+                                        contentDescription = stringResource(R.string.trash_bin_title),
+                                        tint = colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
@@ -313,7 +305,7 @@ fun AppState.RootContent(activity: FragmentActivity) {
                                 BadgedBox(
                                     badge = {
                                         if (pendingWifiList.isNotEmpty()) {
-                                            Badge { Text(ElamalUtils.localizeDigits("${pendingWifiList.size}")) }
+                                            Badge { Text("${pendingWifiList.size}") }
                                         }
                                     }
                                 ) {

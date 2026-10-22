@@ -67,7 +67,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
             ?: "com.nanomks.elamal.LauncherDefault"
     )
     var fontScale by mutableFloatStateOf(prefs.getFloat("font_scale", 1.0f))
-    var useArabicDigits by mutableStateOf(prefs.getBoolean("use_arabic_digits", false))
     var currencySymbol by mutableStateOf(prefs.getString("currency_symbol", "DH") ?: "DH")
 
     var hourlyRate by mutableDoubleStateOf(prefs.getFloat("hourly_rate", 10.0f).toDouble())
@@ -125,7 +124,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var customReportStartMillis by mutableLongStateOf(System.currentTimeMillis() - 14 * 86400_000L)
     var customReportEndMillis by mutableLongStateOf(System.currentTimeMillis())
 
-    // Pre-filled date when opening Add dialogs from the interactive calendar
     var prefillDialogDateMillis by mutableStateOf<Long?>(null)
 
     var showClockOutDialog by mutableStateOf(false)
@@ -139,7 +137,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     var showPinSetupDialog by mutableStateOf(false)
     var showTrashBinDialog by mutableStateOf(false)
 
-    // Unified share options dialog state
     var pendingSharePayload by mutableStateOf<ShareDialogPayload?>(null)
     var shareIncludeDetails by mutableStateOf(prefs.getBoolean("share_include_details", true))
 
@@ -164,7 +161,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
     private var autoBackupJob: Job? = null
 
     init {
-        ElamalUtils.useArabicDigits = useArabicDigits
         ElamalUtils.currencySymbol = currencySymbol
         viewModelScope.launch {
             dao.getActiveEntries().collectLatest { entries = it }
@@ -286,13 +282,6 @@ class AppState(private val app: Application) : AndroidViewModel(app) {
         currencySymbol = clean
         ElamalUtils.currencySymbol = clean
         prefs.edit().putString("currency_symbol", clean).apply()
-        prefsRefreshCounter += 1
-    }
-
-    fun toggleArabicDigits(enabled: Boolean) {
-        useArabicDigits = enabled
-        ElamalUtils.useArabicDigits = enabled
-        prefs.edit().putBoolean("use_arabic_digits", enabled).apply()
         prefsRefreshCounter += 1
     }
 
